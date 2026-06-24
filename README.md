@@ -9,9 +9,11 @@ system, timing) is provided so you can focus on the compute.
 
 > **How the teaching works**
 > - Lesson READMEs are bilingual (中文 + English) so concepts are easy to absorb.
-> - Reference docs and all code comments are English-only.
-> - **You write the core logic** (the CPU update loop, then the CUDA kernels). The framework code is
->   provided and explained.
+> - Reference docs and all code comments are English-only (ASCII).
+> - Three tracks are taught together as you go: **C++**, **CUDA**, and **OpenGL** (shaders + the
+>   render pipeline) — the rendering layer is not a black box.
+> - **You write the core logic** (the CPU update loop, the shaders, then the CUDA kernels). The
+>   framework code is provided and explained.
 
 ---
 
@@ -78,7 +80,7 @@ cuda-sparks/
         └── src/
             ├── main.cpp           ← app loop + timing (provided)
             ├── particle_system.h  ← YOUR work: the CPU update loop
-            └── renderer.h/.cpp    ← OpenGL point renderer (provided)
+            └── renderer.h/.cpp    ← OpenGL point renderer (you edit shaders in Level 3)
 ```
 
 ---

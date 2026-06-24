@@ -6,7 +6,7 @@
 #include <cmath>
 
 // ===========================================================================
-// ParticleSystem  —  the CPU simulation.   *** THIS IS YOUR FILE ***
+// ParticleSystem  --  the CPU simulation.   *** THIS IS YOUR FILE ***
 // ===========================================================================
 // The framework gives you:
 //   - storage for N particles
@@ -17,7 +17,7 @@
 // YOU write:
 //   - update(dt)   : advance every particle by one time step  (the TODO below)
 //
-// In Phase 2 this exact loop becomes a CUDA kernel — so write it as if each
+// In Phase 2 this exact loop becomes a CUDA kernel - so write it as if each
 // particle is independent. That habit is what makes the GPU port easy.
 // ===========================================================================
 class ParticleSystem {
@@ -49,7 +49,7 @@ public:
     }
 
     // ======================================================================
-    //  ── TODO ──  Advance the whole system by one time step `dt`.
+    //  -- TODO --  Advance the whole system by one time step `dt`.
     // ======================================================================
     // For EACH particle i (a simple loop from 0 to params_.n):
     //
@@ -60,7 +60,7 @@ public:
     //
     // Tips:
     //   - Access a field with  particles_[i].vy , particles_[i].x , etc.
-    //   - Keep each iteration independent of the others — no particle should
+    //   - Keep each iteration independent of the others - no particle should
     //     read another particle's data. (That is what makes Phase 2's GPU
     //     port a copy-paste of this logic.)
     // ----------------------------------------------------------------------

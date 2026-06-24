@@ -1,9 +1,9 @@
 // ===========================================================================
-// Phase 1 — CPU Baseline.   (Framework code — you do not need to edit this.)
+// Phase 1 - CPU Baseline.   (Framework code - you do not need to edit this.)
 // ===========================================================================
 // Opens a window, runs the CPU particle simulation, draws it with OpenGL, and
 // shows particle count + FPS + CPU update time in the window title. That title
-// bar is your *baseline benchmark* — remember the numbers; Phase 2 (CUDA) will
+// bar is your *baseline benchmark* - remember the numbers; Phase 2 (CUDA) will
 // beat them.
 // ===========================================================================
 #include <glad/gl.h>

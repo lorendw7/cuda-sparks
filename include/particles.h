@@ -1,7 +1,7 @@
 #pragma once
 
 // ---------------------------------------------------------------------------
-// Particle  —  one element in the simulation
+// Particle  --  one element in the simulation
 // ---------------------------------------------------------------------------
 // Memory layout: Array of Structures (AoS)
 //   All fields for particle i live at particles[i].x, particles[i].y, etc.
@@ -16,7 +16,7 @@ struct Particle {
 };
 
 // ---------------------------------------------------------------------------
-// SimParams  —  simulation configuration passed into every physics kernel
+// SimParams  --  simulation configuration passed into every physics kernel
 // ---------------------------------------------------------------------------
 struct SimParams {
     float dt;           // time step in seconds (e.g. 0.016 for 60 fps)

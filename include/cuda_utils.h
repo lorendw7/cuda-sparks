@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 
 // ---------------------------------------------------------------------------
-// CUDA_CHECK  —  abort on any CUDA API error
+// CUDA_CHECK  --  abort on any CUDA API error
 //
 // Usage:
 //   CUDA_CHECK(cudaMalloc(&ptr, size));
@@ -25,7 +25,7 @@
     } while (0)
 
 // ---------------------------------------------------------------------------
-// gpu_info  —  print a one-line summary of device 0
+// gpu_info  --  print a one-line summary of device 0
 // ---------------------------------------------------------------------------
 inline void gpu_info() {
     int dev = 0;

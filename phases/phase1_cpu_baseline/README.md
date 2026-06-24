@@ -194,11 +194,80 @@ Now you write the other three, following the same shape:
 > 上下两面墙改的是 `y` 和 `vy`,逻辑和左右完全一样。
 
 Build, run, and watch particles ping around inside the box, each bounce a little gentler until they
-settle. When that works, you've cleared Level 2 — and you're ready for **Phase 2 — CUDA Migration**,
-where this exact loop moves onto the GPU.
+settle. When that works, you've cleared Level 2.
 
-> 编译运行,看粒子在盒子里乒乓乱跳,一次比一次温柔,最后慢慢稳下来。成了就通过第二关——
-> 接下来就是 **Phase 2:把这个循环搬上 GPU**。
+> 编译运行,看粒子在盒子里乒乓乱跳,一次比一次温柔,最后慢慢稳下来。成了就通过第二关。
+
+---
+
+## Level 3 / 第三关 — OpenGL shaders / 着色器
+
+So far you only touched the CPU (the physics). Level 3 is your first **OpenGL** lesson: you edit the
+two tiny GPU programs — *shaders* — that decide how each particle is drawn. They live at the top of
+[`src/renderer.cpp`](src/renderer.cpp).
+
+> 前两关你只动了 CPU(物理)。第三关是你的第一节 **OpenGL** 课:改两个跑在 GPU 上的小程序——
+> *着色器(shader)*——它们决定每个粒子怎么画。代码在 `src/renderer.cpp` 顶部。
+
+### The render pipeline / 渲染流水线
+
+The CPU hands the GPU a list of points (position + color). For every point the GPU runs two shaders:
+
+> CPU 把一串点(位置+颜色)交给 GPU。GPU 对每个点跑两个着色器:
+
+```
+your points  ->  ① Vertex Shader        ->  ② Fragment Shader       ->  screen
+(x,y,color)      "where on screen?"          "what color is each pixel?"
+                 (位置 + 点的大小)            (点内每个像素的颜色)
+```
+
+| Concept | In `renderer.cpp` | Plain words / 大白话 |
+|---------|-------------------|----------------------|
+| **Shader** | `kVertexShader` / `kFragmentShader` strings | GPU programs, written in GLSL (C-like) |
+| **VBO** | `glBufferData` | a shelf in GPU memory holding all the points / 显存里存点的货架 |
+| **VAO** | `glVertexAttribPointer` | the layout: 5 floats per point = 2 pos + 3 color / 数据排布说明书 |
+| **Draw call** | `glDrawArrays(GL_POINTS, ...)` | "draw them all" / 一声令下开画 |
+
+### What you build / 这一关做出的效果
+
+Turn the flat square points into **round, glowing dots**. Three coordinated edits:
+
+> 把死板的方块点变成**又圆又发光的光点**。三处配合的改动:
+
+1. **Vertex shader** — make points bigger so the shape is visible: `gl_PointSize = 12.0;`
+2. **Fragment shader** — clip the square into a circle and fade the glow toward the edge:
+   ```glsl
+   void main() {
+       vec2  d    = gl_PointCoord - vec2(0.5);   // offset from the point's center
+       float dist = length(d);                    // 0 = center, 0.5 = edge
+       if (dist > 0.5) discard;                    // drop pixels outside the circle -> round
+       float glow = 1.0 - dist * 2.0;              // 1 at center, 0 at the edge
+       FragColor  = vec4(vColor * glow, glow);     // fade color and alpha outward
+   }
+   ```
+3. **Enable blending** (C++ side, in `init()`) so the soft transparent edges blend with the
+   background instead of overwriting it:
+   ```cpp
+   glEnable(GL_BLEND);
+   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+   ```
+
+### New ideas you met / 新概念
+
+- **GLSL `vec2/vec3/vec4`** — built-in bundles of 2/3/4 floats (a struct you already understand).
+- **`gl_PointCoord`** — where inside the point the current pixel is (center = 0.5, 0.5).
+- **`discard`** — "don't draw this pixel" (this is what carves the square into a circle).
+- **Blending** — every GL call must happen *while the context is alive*: between `init()` and
+  cleanup, **never after** `glfwTerminate()`. A GL call after teardown silently does nothing.
+
+> ⚠️ 重点教训:所有 GL 调用必须在"上下文还活着"时发出——在 `init()` 到渲染循环之间,
+> **绝不能在 `glfwTerminate()` 之后**。否则不报错,但悄悄失效。
+
+Clear Level 3 and you've touched all three layers — **C++**, the **render pipeline**, and (next)
+**CUDA**. You're ready for **Phase 2 — CUDA Migration**, where the Level-1 loop moves onto the GPU.
+
+> 通过第三关,你就摸过了三层——**C++**、**渲染流水线**、接下来是 **CUDA**。
+> 准备进入 **Phase 2:把第一关的循环搬上 GPU**。
 
 ---
 

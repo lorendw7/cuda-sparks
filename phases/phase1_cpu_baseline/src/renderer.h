@@ -2,7 +2,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// Renderer  —  draws particles as colored OpenGL points.  (Framework code.)
+// Renderer  --  draws particles as colored OpenGL points.  (Framework code.)
 // ---------------------------------------------------------------------------
 // You do not need to edit this file. It is here so you can see how the GPU
 // draws things, but the CUDA learning happens in particle_system.h.
