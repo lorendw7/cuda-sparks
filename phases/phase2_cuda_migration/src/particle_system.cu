@@ -2,6 +2,7 @@
 #include "cuda_utils.h"     // CUDA_CHECK macro + gpu_info()  (shared include/ folder)
 
 #include <cuda_runtime.h>
+#include <curand_kernel.h>  // curandState, curand_init, curand_uniform  (Level 2)
 #include <cmath>
 
 // ===========================================================================
@@ -26,6 +27,67 @@ __host__ __device__ inline void emitter_spawn(Particle& p, int i) {
 }
 
 // ===========================================================================
+//  *** YOUR CODE ***  respawn_rng -- recycle a particle with a REAL RNG.
+// ===========================================================================
+// Same job as emitter_spawn above, but the randomness is REAL: it pulls fresh
+// numbers from THIS thread's own curandState (st) instead of faking them from
+// the index. That is what stops the fountain looking mechanical.
+//
+//   curand_uniform(st)  ->  a random float in (0, 1].  One call = one number;
+//                           call it again to get the next number.
+//
+// TODO H -- write the body:
+//   float u1 = curand_uniform(st);
+//   float u2 = curand_uniform(st);
+//   float angle = u1 * 6.2831853f;             // 0 .. 2*pi
+//   float speed = 0.4f + 0.4f * u2;
+//   p.x = 0.0f;  p.y = -0.6f;
+//   p.vx = cosf(angle) * speed;
+//   p.vy = fabsf(sinf(angle)) * speed + 0.4f;  // bias upward
+//   p.r  = 0.01f;
+//   p.life = 0.5f + 0.5f * u1;                  // 0.5 .. 1.0
+// ===========================================================================
+__device__ inline void respawn_rng(Particle& p, curandState* st) {
+
+    // <write TODO H here>
+    float u1 = curand_uniform(st);
+    float u2 = curand_uniform(st);
+    float angle = u1 * 6.2831853f;
+    float speed = 0.4f + 0.4f * u2;
+    p.x = 0.0f; p.y = -0.6f;
+    p.vx = cosf(angle) * speed;
+    p.vy = fabsf(sinf(angle)) * speed + 0.4f;
+    p.r = 0.01f;
+    p.life = 0.5f + 0.5f * u1;
+}
+
+// ===========================================================================
+//  *** YOUR CODE ***  init_rng_kernel -- one RNG stream per particle. (runs once)
+// ===========================================================================
+// Launched ONCE at startup, one thread per particle. curand_init seeds this
+// thread's state. Passing the particle index i as the "sequence" argument gives
+// every particle a DIFFERENT, independent random stream.
+//
+//   curand_init(seed, sequence, offset, &states[i]);
+//      seed     = same base number for all particles (passed in)
+//      sequence = i        <- the key: a different stream per particle
+//      offset   = 0
+//
+// TODO G -- write the body (same index + guard idiom as update_kernel):
+//   int i = blockIdx.x * blockDim.x + threadIdx.x;
+//   if (i >= n) return;
+//   curand_init(seed, i, 0, &states[i]);
+// ===========================================================================
+__global__ void init_rng_kernel(curandState* states, int n, unsigned long long seed) {
+
+    // <write TODO G here>
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    
+    curand_init(seed, i, 0, &states[i]);
+}
+
+// ===========================================================================
 //  *** YOUR CODE ***  The update kernel -- runs ON THE GPU, once per particle.
 // ===========================================================================
 // A kernel is a function marked __global__. We launch it across thousands of
@@ -46,7 +108,8 @@ __host__ __device__ inline void emitter_spawn(Particle& p, int i) {
 // Note: inside the kernel use params.gravity (a dot), NOT params_.gravity --
 // params is the COPY passed in as an argument, not the class member.
 // ===========================================================================
-__global__ void update_kernel(Particle* particles, int n, SimParams params, float dt) {
+__global__ void update_kernel(Particle* particles, int n, SimParams params, float dt,
+                              curandState* states) {
 
     // -- write the kernel body here --
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -74,9 +137,18 @@ __global__ void update_kernel(Particle* particles, int n, SimParams params, floa
     }
 
     particles[i].life -= dt;
-    if(particles[i].life <= 0.0f) {
-        emitter_spawn(particles[i], i);
+
+    // ---- TODO J: recycle with the REAL RNG (replaces emitter_spawn) ----------
+    // Each particle has its own state at states[i]. Pass its ADDRESS so the RNG
+    // can advance it:
+    //   if (particles[i].life <= 0.0f) respawn_rng(particles[i], &states[i]);
+    //
+    // <write TODO J here>
+    if (particles[i].life <= 0.0f)
+    {
+         respawn_rng(particles[i], &states[i]);
     }
+    
 }
 
 // ===========================================================================
@@ -113,6 +185,22 @@ ParticleSystem::ParticleSystem(const SimParams& p)
     //
     // <write TODO B here>
     CUDA_CHECK(cudaMemcpy(d_particles_, host_.data(), (size_t)n_ * sizeof(Particle), cudaMemcpyHostToDevice));
+
+    // ---- TODO I: set up the per-particle RNG --------------------------------
+    // 1) Allocate one curandState per particle in GPU memory. d_rng_ is a void*
+    //    (so the host header stays CUDA-free); cudaMalloc still wants its address:
+    //      CUDA_CHECK(cudaMalloc(&d_rng_, (size_t)n_ * sizeof(curandState)));
+    // 2) Seed them by launching init_rng_kernel ONCE (same grid/block math as
+    //    update). Cast the void* back to curandState* for the kernel:
+    //      int block = 256, grid = (n_ + block - 1) / block;
+    //      init_rng_kernel<<<grid, block>>>((curandState*)d_rng_, n_, 1234ULL);
+    //      CUDA_CHECK(cudaGetLastError());
+    //
+    // <write TODO I here>
+    CUDA_CHECK(cudaMalloc(&d_rng_, (size_t)n_ * sizeof(curandState)));
+    int block = 256, grid = (n_ + block - 1) / block;
+    init_rng_kernel<<<grid, block>>>((curandState*)d_rng_, n_, 1234ULL);
+    CUDA_CHECK(cudaGetLastError());
 }
 
 ParticleSystem::~ParticleSystem() {
@@ -122,6 +210,12 @@ ParticleSystem::~ParticleSystem() {
     //
     // <write TODO C here>
     cudaFree(d_particles_);
+
+    // ---- TODO K: free the RNG states (every cudaMalloc needs a cudaFree) -----
+    //   cudaFree(d_rng_);
+    //
+    // <write TODO K here>
+    cudaFree(d_rng_);
 }
 
 void ParticleSystem::update(float dt) {
@@ -143,7 +237,7 @@ void ParticleSystem::update(float dt) {
     //   CUDA_CHECK(cudaGetLastError());
     //
     // <write TODO E here>
-    update_kernel<<<grid, block>>>(d_particles_, n_, params_, dt);
+    update_kernel<<<grid, block>>>(d_particles_, n_, params_, dt, (curandState*)d_rng_);
     CUDA_CHECK(cudaGetLastError());
 
     // ---- TODO F: copy results back DOWN to the CPU (Device -> Host) ----------

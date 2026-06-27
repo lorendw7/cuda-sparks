@@ -34,4 +34,8 @@ private:
     int                    n_ = 0;
     Particle*              d_particles_ = nullptr;   // GPU pointer (device memory)
     std::vector<Particle>  host_;                    // CPU mirror for rendering
+    void*                  d_rng_ = nullptr;         // device curandState array (one RNG
+                                                     // per particle). Kept as void* so this
+                                                     // host-readable header needs no CUDA
+                                                     // headers; the .cu casts it to curandState*.
 };
