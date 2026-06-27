@@ -72,6 +72,32 @@ public:
             particles_[i].x += particles_[i].vx * dt;
             particles_[i].y += particles_[i].vy * dt;
 
+            if (particles_[i].x > params_.bound) {
+                particles_[i].x = params_.bound;
+                particles_[i].vx = 
+                -particles_[i].vx * params_.restitution;
+            }
+
+            if (particles_[i].x < -params_.bound) {
+                particles_[i].x = -params_.bound;
+                particles_[i].vx = -particles_[i].vx * params_.restitution;
+            }
+
+            if (particles_[i].y > params_.bound)
+            {
+                particles_[i].y = params_.bound;
+                particles_[i].vy = -particles_[i].vy * params_.restitution;
+            }
+
+            if (particles_[i].y < -params_.bound)   
+            {
+                particles_[i].y = -params_.bound;
+                particles_[i].vy = -particles_[i].vy * params_.restitution;
+            }
+            
+            
+
+
             particles_[i].life -= dt;
 
             if (particles_[i].life <= 0)

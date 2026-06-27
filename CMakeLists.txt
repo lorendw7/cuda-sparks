@@ -1,12 +1,16 @@
 cmake_minimum_required(VERSION 3.18)
 
-# CUDA is only required from Phase 2 on. Phase 1 is pure C++.
-# We enable CUDA here but make it optional so Phase 1 still configures on machines
-# that are still setting up the toolkit.
-project(cuda_sparks LANGUAGES CXX)
+# Phase 1 is pure C++; Phase 2 onward adds CUDA. Both languages are enabled here.
+project(cuda_sparks LANGUAGES C CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# CUDA settings (used from Phase 2 on).
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_ARCHITECTURES native)   # auto-detect this machine's GPU
+# Keep line numbers in compiled device code so Nsight (Phase 4) can map them.
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --generate-line-info")
 
 # Make every target (ours + GLFW + glad) use the same MSVC runtime (dynamic /MD),
 # otherwise the linker warns about LIBCMT conflicts.
@@ -47,3 +51,4 @@ glad_add_library(glad_gl_core STATIC API gl:core=3.3)
 # Phases
 # ---------------------------------------------------------------------------
 add_subdirectory(phases/phase1_cpu_baseline)
+add_subdirectory(phases/phase2_cuda_migration)

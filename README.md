@@ -8,7 +8,7 @@ learning happens are left for **you** to write. The framework (windowing, OpenGL
 system, timing) is provided so you can focus on the compute.
 
 > **How the teaching works**
-> - Lesson READMEs are bilingual (中文 + English) so concepts are easy to absorb.
+> - Lesson READMEs are bilingual (Chinese + English) so concepts are easy to absorb.
 > - Reference docs and all code comments are English-only (ASCII).
 > - Three tracks are taught together as you go: **C++**, **CUDA**, and **OpenGL** (shaders + the
 >   render pipeline) — the rendering layer is not a black box.
@@ -29,6 +29,9 @@ system, timing) is provided so you can focus on the compute.
 Phase 1 is in [`phases/phase1_cpu_baseline/`](phases/phase1_cpu_baseline/). Each later phase appears
 as you finish the one before it.
 
+> **New here? Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) first** — it maps how every piece
+> fits together and exactly which code is yours to write vs. provided plumbing.
+
 ---
 
 ## Prerequisites
@@ -48,16 +51,19 @@ for you via CMake `FetchContent`, and a GL loader (glad) is generated at configu
 
 ## Build & Run
 
-```bash
-cmake -B build -S .
-cmake --build build --parallel
-```
-
-Run Phase 1 (Windows):
+Use the helper script — it sets up the MSVC + CUDA environment, configures with the **Ninja**
+generator, and builds everything:
 
 ```bash
-.\build\phases\phase1_cpu_baseline\Release\phase1.exe
+.\build.bat          REM build all phases
+.\build.bat run1     REM build, then run Phase 1 (CPU)
+.\build.bat run2     REM build, then run Phase 2 (CUDA)
+.\build.bat clean    REM delete build/ and start fresh
 ```
+
+> Why Ninja (not the Visual Studio generator)? VS 2026 does not ship the CUDA toolset integration,
+> so the VS generator cannot compile `.cu` files. Ninja (bundled with VS) calls `nvcc` directly and
+> needs no admin install. `build.bat` points CMake at it for you.
 
 > The first configure downloads GLFW and glad — give it a minute. Later builds are fast.
 
@@ -72,22 +78,31 @@ cuda-sparks/
 │   ├── particles.h            ← Particle struct and SimParams (shared by all phases)
 │   └── cuda_utils.h           ← CUDA_CHECK macro and gpu_info() (used from Phase 2)
 ├── docs/
-│   └── cuda_reference.md      ← CUDA syntax quick reference
+│   ├── ARCHITECTURE.md       ← how it all fits + who writes what (read first)
+│   └── cuda_reference.md     ← CUDA syntax quick reference
 └── phases/
-    └── phase1_cpu_baseline/
+    ├── phase1_cpu_baseline/
+    │   ├── README.md          ← the lesson: read this first
+    │   ├── CMakeLists.txt
+    │   └── src/
+    │       ├── main.cpp           ← app loop + timing (provided)
+    │       ├── particle_system.h  ← YOUR work: the CPU update loop
+    │       └── renderer.h/.cpp    ← OpenGL point renderer (you edit shaders in Level 3)
+    └── phase2_cuda_migration/
         ├── README.md          ← the lesson: read this first
         ├── CMakeLists.txt
         └── src/
-            ├── main.cpp           ← app loop + timing (provided)
-            ├── particle_system.h  ← YOUR work: the CPU update loop
-            └── renderer.h/.cpp    ← OpenGL point renderer (you edit shaders in Level 3)
+            ├── main.cpp           ← app loop (identical shape to Phase 1)
+            ├── particle_system.h  ← host-side class interface (plain C++)
+            ├── particle_system.cu ← YOUR work: the CUDA kernel + memory plumbing
+            └── renderer.h/.cpp    ← OpenGL point renderer (same as Phase 1)
 ```
 
 ---
 
 ## How to Use a Phase
 
-1. Read the phase `README.md` — it explains the concept in 中文 + English.
+1. Read the phase `README.md` — it explains the concept in Chinese + English.
 2. Open the file you're meant to edit and find every `// ── TODO ──` block.
 3. Write your code in the marked sections only.
 4. Build, run, and watch the particles (and the FPS counter in the title bar).
