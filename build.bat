@@ -4,6 +4,7 @@ REM  cuda-sparks build helper (Ninja + MSVC + nvcc)
 REM    build.bat            - configure (first time) + build everything
 REM    build.bat run1       - build, then run Phase 1 (CPU)
 REM    build.bat run2       - build, then run Phase 2 (CUDA)
+REM    build.bat run3       - build, then run Phase 3 (Effects)
 REM    build.bat clean      - delete the build/ folder and start fresh
 REM
 REM  We use the Ninja generator (bundled with Visual Studio) instead of the
@@ -45,6 +46,10 @@ if "%1"=="run1" (
 if "%1"=="run2" (
     echo.
     "%BUILD_DIR%\phases\phase2_cuda_migration\phase2.exe"
+)
+if "%1"=="run3" (
+    echo.
+    "%BUILD_DIR%\phases\phase3_effects\phase3.exe"
 )
 
 endlocal

@@ -1,0 +1,10 @@
+{
+  // This project is built ONLY via build.bat (Ninja + nvcc + vcvars64).
+  // The CMake Tools extension's default configure uses the Visual Studio
+  // generator, which has no CUDA toolset on VS 2026 ("No CUDA toolset found")
+  // and pollutes the build/ dir that build.bat relies on. Disable its
+  // automatic configuration so it stops fighting build.bat.
+  "cmake.configureOnOpen": false,
+  "cmake.configureOnEdit": false,
+  "cmake.automaticReconfigure": false
+}
