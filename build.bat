@@ -31,7 +31,7 @@ set PATH=%NINJA_DIR%;%PATH%
 REM Configure once (creates build/, downloads GLFW + glad the first time).
 if not exist "%BUILD_DIR%\CMakeCache.txt" (
     echo Configuring ^(first build downloads GLFW + glad^)...
-    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -B "%BUILD_DIR%" -S "%ROOT%"
+    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -B "%BUILD_DIR%" -S "%ROOT%"
     if errorlevel 1 exit /b 1
 )
 

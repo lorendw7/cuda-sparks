@@ -23,7 +23,7 @@ __host__ __device__ inline void emitter_spawn(Particle& p, int i) {
     p.vx   = cosf(angle) * speed;
     p.vy   = fabsf(sinf(angle)) * speed + 0.4f;  // bias upward
     p.r    = 0.01f;
-    p.life = 0.5f + 0.5f * f1;                // 0.5 .. 1.0
+    p.life = 2.0f + 0.5f * f1;                // 0.5 .. 1.0
 }
 
 // ===========================================================================
@@ -42,7 +42,7 @@ __device__ inline void respawn_rng(Particle& p, curandState* st) {
     p.vx = cosf(angle) * speed;
     p.vy = fabsf(sinf(angle)) * speed + 0.4f;
     p.r = 0.01f;
-    p.life = 0.5f + 0.5f * u1;
+    p.life = 2.0f + 0.5f * u1;
 }
 
 // ===========================================================================
@@ -69,12 +69,18 @@ __global__ void init_rng_kernel(curandState* states, int n, unsigned long long s
 // Note: use params.gravity (a dot), NOT params_.gravity -- params is the COPY
 // passed in as an argument, not the class member.
 // ===========================================================================
-__global__ void update_kernel(Particle* particles, int n, SimParams params, float dt,
-                              curandState* states) {
+__global__ void update_kernel(Particle* particles, int n, SimParams params, float dt, curandState* states,
+            float wellX, float wellY, float strength) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i >= n) return;
 
     particles[i].vy -= params.gravity * dt;
+    float dx = wellX - particles[i].x;
+    float dy = wellY - particles[i].y;
+    float dist = sqrtf(dx * dx + dy * dy + 0.01f); // +0.01f softening: never /0
+    particles[i].vx += (dx / dist) * strength * dt;
+    particles[i].vy += (dy / dist) * strength * dt;
+
     particles[i].x += particles[i].vx * dt;
     particles[i].y += particles[i].vy * dt;
 
@@ -147,7 +153,7 @@ void ParticleSystem::update(float dt) {
     int grid = (n_ + block - 1) / block;
 
     // Launch the kernel (one thread per particle), then check the launch.
-    update_kernel<<<grid, block>>>(d_particles_, n_, params_, dt, (curandState*)d_rng_);
+    update_kernel<<<grid, block>>>(d_particles_, n_, params_, dt, (curandState*)d_rng_, 0.0f, 0.3f, 5.0f);
     CUDA_CHECK(cudaGetLastError());
 
     // Copy results back to the CPU for rendering. (This per-frame copy is the
