@@ -60,6 +60,39 @@ __global__ void init_rng_kernel(curandState* states, int n, unsigned long long s
 }
 
 // ===========================================================================
+// nbody_force_kernel  --  naive O(n^2) gravity between every pair of particles.
+// ===========================================================================
+// Each thread (particle i) loops over ALL particles j and sums the gravitational
+// pull from each: magnitude 1/dist^2 times the unit direction (dx,dy)/dist, which
+// combine to (dx,dy)/dist^3. With N threads each doing N iterations this is N^2
+// work per frame -- the cost we will later cut with __shared__ memory tiling.
+//
+// It writes ONLY the velocity (vx/vy), never the position: positions are read by
+// every other thread this pass, so moving them here would be a data race. The
+// position integration runs afterwards in update_kernel (a separate launch).
+// ===========================================================================
+__global__ void nbody_force_kernel(Particle* particles, int n, float strength,
+float dt) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i >= n) return;
+    float xi = particles[i].x, yi = particles[i].y;
+    float ax = 0.0f, ay = 0.0f;
+
+    for (int j = 0; j < n; j++)
+    {
+        float dx = particles[j].x - xi, dy = particles[j].y - yi;
+        float dist2 = dx * dx + dy * dy + 0.01f;
+        float inv = rsqrtf(dist2);
+        float inv3 = inv * inv * inv;
+        ax += dx * inv3;
+        ay += dy * inv3;
+    }
+
+    particles[i].vx += ax * strength * dt;
+    particles[i].vy += ay * strength * dt;
+}
+
+// ===========================================================================
 // update_kernel  --  advance one particle per thread.  (runs every frame)
 // ===========================================================================
 // Per-particle physics: gravity, integrate position, bounce off the 4 walls,
@@ -69,17 +102,11 @@ __global__ void init_rng_kernel(curandState* states, int n, unsigned long long s
 // Note: use params.gravity (a dot), NOT params_.gravity -- params is the COPY
 // passed in as an argument, not the class member.
 // ===========================================================================
-__global__ void update_kernel(Particle* particles, int n, SimParams params, float dt, curandState* states,
-            float wellX, float wellY, float strength) {
+__global__ void update_kernel(Particle* particles, int n, SimParams params, float dt, curandState* states) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i >= n) return;
 
     particles[i].vy -= params.gravity * dt;
-    float dx = wellX - particles[i].x;
-    float dy = wellY - particles[i].y;
-    float dist = sqrtf(dx * dx + dy * dy + 0.01f); // +0.01f softening: never /0
-    particles[i].vx += (dx / dist) * strength * dt;
-    particles[i].vy += (dy / dist) * strength * dt;
 
     particles[i].x += particles[i].vx * dt;
     particles[i].y += particles[i].vy * dt;
@@ -152,8 +179,14 @@ void ParticleSystem::update(float dt) {
     int block = 256;
     int grid = (n_ + block - 1) / block;
 
-    // Launch the kernel (one thread per particle), then check the launch.
-    update_kernel<<<grid, block>>>(d_particles_, n_, params_, dt, (curandState*)d_rng_, 0.0f, 0.3f, 5.0f);
+    // Phase 1 -- N-body: read every position, accumulate gravity, write velocities only.
+    nbody_force_kernel<<<grid, block>>>(d_particles_, n_, 0.0001f, dt);
+    CUDA_CHECK(cudaGetLastError());
+
+    // Phase 2 -- integrate: all velocities are now final, so move the positions,
+    // bounce off walls, age, and recycle. The launch boundary above is a global
+    // sync point, so no thread moves a position another thread is still reading.
+    update_kernel<<<grid, block>>>(d_particles_, n_, params_, dt, (curandState*)d_rng_);
     CUDA_CHECK(cudaGetLastError());
 
     // Copy results back to the CPU for rendering. (This per-frame copy is the
