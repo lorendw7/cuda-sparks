@@ -110,7 +110,7 @@ public:
     // ======================================================================
 
     // ---- framework: pack particles into interleaved [x,y,r,g,b] vertices ----
-    // Color fades from hot (white-yellow) when young to red as life runs out.
+    // Color fades from cyan-white when young to magenta-purple as life runs out.
     void to_vertices(std::vector<float>& out) const {
         out.resize((size_t)params_.n * 5);
         for (int i = 0; i < params_.n; ++i) {
@@ -121,9 +121,9 @@ public:
             float* v = &out[(size_t)i * 5];
             v[0] = p.x;
             v[1] = p.y;
-            v[2] = 1.0f;                          // red   channel (always strong)
-            v[3] = 0.4f + 0.6f * t;               // green: bright when young
-            v[4] = 0.2f * t;                      // blue : a touch when young
+            v[2] = 0.75f - 0.35f * t;             // red:   magenta (old) -> cyan (young)
+            v[3] = 0.20f + 0.65f * t;             // green: brighter the younger the particle
+            v[4] = 0.85f + 0.15f * t;             // blue:  always strong (nebula glow)
         }
     }
 

@@ -8,12 +8,12 @@ learning happens are left for **you** to write. The framework (windowing, OpenGL
 system, timing) is provided so you can focus on the compute.
 
 > **How the teaching works**
-> - Lesson READMEs are bilingual (Chinese + English) so concepts are easy to absorb.
-> - Reference docs and all code comments are English-only (ASCII).
+> - All docs (READMEs, references) and code comments are English-only (ASCII).
 > - Three tracks are taught together as you go: **C++**, **CUDA**, and **OpenGL** (shaders + the
 >   render pipeline) — the rendering layer is not a black box.
-> - **You write the core logic** (the CPU update loop, the shaders, then the CUDA kernels). The
->   framework code is provided and explained.
+> - **You write the code.** Early phases leave the core logic (the CPU update loop, the CUDA
+>   kernels) for you; from Phase 3 on you write essentially everything. The framework is explained
+>   as you go.
 
 ---
 
@@ -58,6 +58,7 @@ generator, and builds everything:
 .\build.bat          REM build all phases
 .\build.bat run1     REM build, then run Phase 1 (CPU)
 .\build.bat run2     REM build, then run Phase 2 (CUDA)
+.\build.bat run3     REM build, then run Phase 3 (Effects)
 .\build.bat clean    REM delete build/ and start fresh
 ```
 
@@ -88,21 +89,28 @@ cuda-sparks/
     │       ├── main.cpp           ← app loop + timing (provided)
     │       ├── particle_system.h  ← YOUR work: the CPU update loop
     │       └── renderer.h/.cpp    ← OpenGL point renderer (you edit shaders in Level 3)
-    └── phase2_cuda_migration/
-        ├── README.md          ← the lesson: read this first
+    ├── phase2_cuda_migration/
+    │   ├── README.md          ← the lesson: read this first
+    │   ├── CMakeLists.txt
+    │   └── src/
+    │       ├── main.cpp           ← app loop (identical shape to Phase 1)
+    │       ├── particle_system.h  ← host-side class interface (plain C++)
+    │       ├── particle_system.cu ← YOUR work: the CUDA kernel + memory plumbing
+    │       └── renderer.h/.cpp    ← OpenGL point renderer (same as Phase 1)
+    └── phase3_effects/
         ├── CMakeLists.txt
         └── src/
-            ├── main.cpp           ← app loop (identical shape to Phase 1)
-            ├── particle_system.h  ← host-side class interface (plain C++)
-            ├── particle_system.cu ← YOUR work: the CUDA kernel + memory plumbing
-            └── renderer.h/.cpp    ← OpenGL point renderer (same as Phase 1)
+            ├── main.cpp           ← app loop (1280x1280 window)
+            ├── particle_system.h  ← host-side class interface
+            ├── particle_system.cu ← YOUR work: gravity well + N-body force kernels
+            └── renderer.h/.cpp    ← OpenGL point renderer (fully commented reference)
 ```
 
 ---
 
 ## How to Use a Phase
 
-1. Read the phase `README.md` — it explains the concept in Chinese + English.
+1. Read the phase `README.md` — it explains the concept and what you'll write.
 2. Open the file you're meant to edit and find every `// ── TODO ──` block.
 3. Write your code in the marked sections only.
 4. Build, run, and watch the particles (and the FPS counter in the title bar).

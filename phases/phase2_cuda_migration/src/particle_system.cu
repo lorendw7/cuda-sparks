@@ -264,8 +264,8 @@ void ParticleSystem::to_vertices(std::vector<float>& out) const {
         float* v = &out[(size_t)i * 5];
         v[0] = p.x;
         v[1] = p.y;
-        v[2] = 1.0f;                 // red
-        v[3] = 0.4f + 0.6f * t;      // green: bright when young
-        v[4] = 0.2f * t;             // blue
+        v[2] = 0.75f - 0.35f * t;    // red:   magenta (old) -> cyan (young)
+        v[3] = 0.20f + 0.65f * t;    // green: brighter the younger the particle
+        v[4] = 0.85f + 0.15f * t;    // blue:  always strong (nebula glow)
     }
 }

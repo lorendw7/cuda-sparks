@@ -19,8 +19,8 @@
 #include <vector>
 
 static constexpr int kNumParticles = 10000;   // start here; try 100000, 1000000
-static constexpr int kWidth  = 1000;
-static constexpr int kHeight = 1000;
+static constexpr int kWidth  = 1280;   // keep square so [-1,1] world coords aren't distorted
+static constexpr int kHeight = 1280;
 
 int main() {
     if (!glfwInit()) {

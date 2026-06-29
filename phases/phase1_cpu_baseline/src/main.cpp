@@ -17,8 +17,8 @@
 #include <vector>
 
 static constexpr int kNumParticles = 10000;   // Phase 1 target
-static constexpr int kWidth  = 1000;
-static constexpr int kHeight = 1000;
+static constexpr int kWidth  = 1280;   // keep square so [-1,1] world coords aren't distorted
+static constexpr int kHeight = 1280;
 
 int main() {
     // ---- 1. create a window with an OpenGL 3.3 core context ----
