@@ -15,7 +15,7 @@ From this phase on, **you write all of the code** — the kernels, the launches,
 |-------|--------|----------|
 | **1 — Gravity well** ✅ | Particles are pulled toward an attractor point | a force toward a point: direction × magnitude, softening |
 | **2 — Naive N-body** ✅ | Every particle attracts every other particle | an `O(n^2)` loop in the kernel; splitting force/integrate kernels to avoid a data race |
-| **3 — Shared memory** ▶ | The same N-body, but fast | `__shared__` memory + tiling + `__syncthreads()` |
+| **3 — Shared memory** ✅ | The same N-body, but fast | `__shared__` memory + tiling + `__syncthreads()` |
 
 ---
 
@@ -77,13 +77,47 @@ The boundary between the two launches is a **global synchronization point** — 
 
 ---
 
-## Level 3 — Shared memory (next)
+## Level 3 — Shared memory
 
 The naive N-body re-reads all `n` particle positions from slow global memory, for every one of the
-`n` threads — `n^2` global reads. **Tiling** has each block cooperatively load a small tile of
-positions into fast on-chip `__shared__` memory, which all 256 threads in the block reuse, cutting
-global reads by roughly the block size. `__syncthreads()` coordinates the load. This is the payoff
-of Phase 3.
+`n` threads — `n^2` global reads. **Tiling** keeps the same `O(n^2)` math but changes *where* the
+positions are read from: each block cooperatively loads a 256-wide **tile** of positions into fast
+on-chip `__shared__` memory **once**, then all 256 threads reuse it. The outer loop marches the tile
+across all particles in steps of `blockDim.x`, cutting global reads by roughly the block size.
+
+```cpp
+__shared__ float2 tile[256];
+
+for (int t = 0; t < n; t += blockDim.x) {
+    int j = t + tid;
+    tile[tid] = (j < n) ? make_float2(particles[j].x, particles[j].y)
+                        : make_float2(0.0f, 0.0f);
+    __syncthreads();                          // tile fully loaded before anyone reads
+
+    int valid = min((int)blockDim.x, n - t);  // real particles in this tile
+    for (int k = 0; k < valid; k++) {
+        float dx = tile[k].x - xi, dy = tile[k].y - yi;
+        float dist2 = dx*dx + dy*dy + 0.01f;
+        float inv = rsqrtf(dist2);
+        float inv3 = inv * inv * inv;
+        ax += dx * inv3;  ay += dy * inv3;
+    }
+    __syncthreads();                          // everyone done before tile is reused
+}
+```
+
+Two ideas make or break this kernel:
+
+- **Both `__syncthreads()` are mandatory.** The first stops a thread from reading `tile[]` before
+  it is fully loaded; the second stops a fast thread from overwriting `tile[]` for the next step
+  while a slow thread is still reading it. Every thread in the block must reach each barrier, so the
+  `i < n` guard at the top **returns nothing** — out-of-range threads still loop and sync.
+- **The padding trap.** `kNumParticles` (10000) is not a multiple of 256, so the last tile is only
+  partly real; the rest is `(0,0)`. Looping the full `blockDim.x` would let those `(0,0)` "ghost"
+  particles add a fake pull toward the origin. `valid` bounds the inner loop to the real entries.
+
+This is the payoff of Phase 3: same physics as Level 2, but the per-frame `update` time drops because
+the expensive global-memory traffic is replaced by shared-memory reuse.
 
 ---
 
