@@ -6,48 +6,73 @@
 #include <cmath>
 
 // ===========================================================================
-// emitter_spawn  --  put a particle back at the fountain mouth.  (given helper)
+// Emitter table in __constant__ memory  (Level 4)
 // ===========================================================================
-// Used only for the one-time initial fill on the CPU (constructor). The
-// randomness here is faked from the index i; at runtime, recycling uses the
-// real per-particle RNG (respawn_rng) instead.
+// A small, read-only table every thread consults to know where/how to spawn a
+// particle. __constant__ lives in a special cached GPU region: when a warp's 32
+// threads read the same address, the hardware fetches once and broadcasts it.
+// It is NOT cudaMalloc'd -- it is a fixed global symbol that already exists on
+// the device. The host fills it once with cudaMemcpyToSymbol (Step 5).
 // ===========================================================================
-__host__ __device__ inline void emitter_spawn(Particle &p, int i)
+#define MAX_EMITTERS 8
+__constant__ Emitter d_emitters[MAX_EMITTERS];
+__constant__ int d_numEmitters;
+
+// ===========================================================================
+// emitter_spawn  --  birth a particle from a given emitter.  (given helper)
+// ===========================================================================
+// Used only for the one-time initial fill on the CPU (constructor), so it runs
+// on the HOST -- which CANNOT read __constant__ d_emitters. That is why the
+// emitter is passed in by value (em): the caller hands it a host-side Emitter.
+// The randomness here is faked from the index i; at runtime, recycling uses the
+// real per-particle RNG (respawn_rng), which reads d_emitters on the device.
+// ===========================================================================
+__host__ __device__ inline void emitter_spawn(Particle &p, int i, const Emitter &em)
 {
     float f1 = i * 0.6180340f;
     f1 -= floorf(f1);
     float f2 = i * 0.7548777f;
     f2 -= floorf(f2);
 
-    float angle = f1 * 6.2831853f; // 0 .. 2*pi
-    float speed = 0.4f + 0.4f * f2;
-    p.x = 0.0f; // emitter at screen center
-    p.y = -0.6f;
+    float angle = em.angle + (f1 - 0.5f) * em.spread; // 0 .. 2*pi
+    float speed = em.baseSpeed * (0.8f + 0.4f * f2);
+    p.x = em.x;
+    p.y = em.y;
     p.vx = cosf(angle) * speed;
-    p.vy = fabsf(sinf(angle)) * speed + 0.4f; // bias upward
+    p.vy = sinf(angle) * speed;
     p.r = 0.01f;
-    p.life = 2.0f + 0.5f * f1; // 0.5 .. 1.0
+    p.cr = em.r;
+    p.cg = em.g;
+    p.cb = em.b;
+    p.life = em.lifetime;
 }
 
 // ===========================================================================
-// respawn_rng  --  recycle a particle using its own real RNG stream.
+// respawn_rng  --  recycle a particle from emitter e using its real RNG stream.
 // ===========================================================================
-// Same job as emitter_spawn, but pulls fresh numbers from THIS particle's
-// curandState (st) via curand_uniform, so the fountain looks natural rather
-// than mechanical. st is already a pointer, so it is passed straight through.
+// Same job as emitter_spawn, but runs on the DEVICE, so it reads the emitter
+// straight from __constant__ d_emitters[e] and pulls fresh numbers from THIS
+// particle's curandState (st) via curand_uniform, so the spray looks natural
+// rather than mechanical. st is already a pointer, so it is passed straight
+// through; e is the emitter index the caller picked (i % d_numEmitters).
 // ===========================================================================
-__device__ inline void respawn_rng(Particle &p, curandState *st)
+__device__ inline void respawn_rng(Particle &p, curandState *st, int e)
 {
     float u1 = curand_uniform(st);
     float u2 = curand_uniform(st);
-    float angle = u1 * 6.2831853f;
-    float speed = 0.4f + 0.4f * u2;
-    p.x = 0.0f;
-    p.y = -0.6f;
+    float angle = d_emitters[e].angle + (u1 - 0.5f) * d_emitters[e].spread;
+    float speed = d_emitters[e].baseSpeed * (0.8f + 0.4f * u2) + 0.4f;
+    p.x = d_emitters[e].x;
+    p.y = d_emitters[e].y;
     p.vx = cosf(angle) * speed;
-    p.vy = fabsf(sinf(angle)) * speed + 0.4f;
+    p.vy = sinf(angle) * speed;
+
     p.r = 0.01f;
-    p.life = 2.0f + 0.5f * u1;
+    p.cr = d_emitters[e].r;
+    p.cg = d_emitters[e].g;
+    p.cb = d_emitters[e].b;
+
+    p.life = d_emitters[e].lifetime;
 }
 
 // ===========================================================================
@@ -182,7 +207,7 @@ __global__ void update_kernel(Particle *particles, int n, SimParams params, floa
     // the RNG state can advance).
     if (particles[i].life <= 0.0f)
     {
-        respawn_rng(particles[i], &states[i]);
+        respawn_rng(particles[i], &states[i], i % d_numEmitters);
     }
 }
 
@@ -199,13 +224,27 @@ ParticleSystem::ParticleSystem(const SimParams &p)
 {
     gpu_info(); // (given) print which GPU we are on
 
+    // Build the emitter table on the HOST (the CPU cannot read __constant__
+    // memory). Each row is { x, y, angle, spread, baseSpeed, r, g, b, lifetime }.
+    // Three independent fountains: positions pushed to the sides and aimed apart
+    // (left fans up-left, right fans up-right) so they do not overlap into a blob.
+    std::vector<Emitter> emitters;
+    emitters.push_back({-0.8f, -0.6f, 2.1f, 0.8f, 0.9f, 1.0f, 0.3f, 0.2f, 6.0f});   // left,   red,    aims up-left
+    emitters.push_back({0.0f, -0.6f, 1.5708f, 0.8f, 0.9f, 0.2f, 1.0f, 0.9f, 6.0f}); // middle, cyan,   aims straight up
+    emitters.push_back({0.8f, -0.6f, 1.1f, 0.8f, 0.9f, 0.7f, 0.3f, 1.0f, 6.0f});    // right,  purple, aims up-right
+    int numEmitters = (int)emitters.size();
+
+    // Upload the table into __constant__ memory by SYMBOL name (not a pointer).
+    CUDA_CHECK(cudaMemcpyToSymbol(d_emitters, emitters.data(), numEmitters * sizeof(Emitter)));
+    CUDA_CHECK(cudaMemcpyToSymbol(d_numEmitters, &numEmitters, sizeof(int)));
+
     // Allocate the particle array in GPU memory.
     CUDA_CHECK(cudaMalloc(&d_particles_, (size_t)n_ * sizeof(Particle)));
 
     // Build the starting state on the CPU (given).
     host_.resize(n_);
     for (int i = 0; i < n_; ++i)
-        emitter_spawn(host_[i], i);
+        emitter_spawn(host_[i], i, emitters[i % numEmitters]);
 
     // Copy the initial array up to the GPU (Host -> Device).
     CUDA_CHECK(cudaMemcpy(d_particles_, host_.data(), (size_t)n_ * sizeof(Particle), cudaMemcpyHostToDevice));
@@ -232,7 +271,7 @@ void ParticleSystem::update(float dt)
 
     // Phase 1 -- N-body (shared-memory tiled): read every position through a
     // 256-wide shared tile, accumulate gravity, write velocities only.
-    nbody_force_tiled<<<grid, block>>>(d_particles_, n_, 0.0001f, dt);
+    nbody_force_tiled<<<grid, block>>>(d_particles_, n_, 0.00001f, dt);
     CUDA_CHECK(cudaGetLastError());
 
     // Phase 2 -- integrate: all velocities are now final, so move the positions,
@@ -249,13 +288,18 @@ void ParticleSystem::update(float dt)
 // ---------------------------------------------------------------------------
 // to_vertices  --  pack particles into [x,y,r,g,b] for the renderer.  (given)
 // ---------------------------------------------------------------------------
+// Level 4: the color now comes from each particle's OWN cr/cg/cb (copied from
+// its emitter at spawn), not a global lifetime gradient. We still multiply by a
+// life-based fade `t` so a particle dims to black as it ages instead of popping
+// out of existence the instant it is recycled.
+// ---------------------------------------------------------------------------
 void ParticleSystem::to_vertices(std::vector<float> &out) const
 {
     out.resize((size_t)n_ * 5);
     for (int i = 0; i < n_; ++i)
     {
         const Particle &p = host_[i];
-        float t = p.life;
+        float t = p.life; // fade factor: full color while alive, dim near death
         if (t < 0.0f)
             t = 0.0f;
         if (t > 1.0f)
@@ -263,8 +307,9 @@ void ParticleSystem::to_vertices(std::vector<float> &out) const
         float *v = &out[(size_t)i * 5];
         v[0] = p.x;
         v[1] = p.y;
-        v[2] = 0.75f - 0.35f * t; // red:   magenta (old) -> cyan (young)
-        v[3] = 0.20f + 0.65f * t; // green: brighter the younger the particle
-        v[4] = 0.85f + 0.15f * t; // blue:  always strong (nebula glow)
+        float hot = t * t;
+        v[2] = (p.cr + hot) * t; // each emitter's own color, faded by remaining life
+        v[3] = (p.cg + hot) * t;
+        v[4] = (p.cb + hot) * t;
     }
 }

@@ -16,6 +16,7 @@ From this phase on, **you write all of the code** — the kernels, the launches,
 | **1 — Gravity well** ✅ | Particles are pulled toward an attractor point | a force toward a point: direction × magnitude, softening |
 | **2 — Naive N-body** ✅ | Every particle attracts every other particle | an `O(n^2)` loop in the kernel; splitting force/integrate kernels to avoid a data race |
 | **3 — Shared memory** ✅ | The same N-body, but fast | `__shared__` memory + tiling + `__syncthreads()` |
+| **4 — Multiple emitters** ✅ | Several independent fountains, each its own style | `__constant__` memory + a data-driven `Emitter` table |
 
 ---
 
@@ -118,6 +119,54 @@ Two ideas make or break this kernel:
 
 This is the payoff of Phase 3: same physics as Level 2, but the per-frame `update` time drops because
 the expensive global-memory traffic is replaced by shared-memory reuse.
+
+---
+
+## Level 4 — Multiple emitters
+
+Until now every particle was born at the same hard-coded fountain mouth. Level 4 makes spawning
+**data-driven**: a table of `Emitter` recipes (position, aim `angle`, `spread`, `baseSpeed`, color,
+`lifetime`) decides where and how each particle is born. Particle `i` belongs to emitter
+`i % numEmitters`, so the work spreads evenly across the fountains.
+
+### The new idea — `__constant__` memory
+
+The emitter table is read by **every thread** and **never written** during a kernel — the exact
+shape `__constant__` memory is built for. It is a small (64 KB), GPU-cached, read-only region:
+
+```cpp
+#define MAX_EMITTERS 8
+__constant__ Emitter d_emitters[MAX_EMITTERS];   // a fixed global symbol — NOT cudaMalloc'd
+__constant__ int      d_numEmitters;
+```
+
+When the 32 threads of a **warp** read the same address, the hardware fetches it once and broadcasts
+it to all 32 — so a shared lookup table is essentially free. You fill it once from the host by
+**symbol name** (constant memory has no ordinary pointer):
+
+```cpp
+cudaMemcpyToSymbol(d_emitters, emitters.data(), numEmitters * sizeof(Emitter));
+cudaMemcpyToSymbol(d_numEmitters, &numEmitters, sizeof(int));
+```
+
+### Two traps caught along the way
+
+- **The host cannot read `__constant__` memory.** The one-time initial fill runs on the CPU, so
+  `emitter_spawn` takes the emitter **by value** from a host-side `std::vector<Emitter>`; only the
+  device-side `respawn_rng` reads `d_emitters[e]` directly.
+- **Spawn direction is now per-emitter.** The old fountain forced every particle upward
+  (`fabsf(sin) * speed + 0.4f`). That hard-coded "up" is gone — direction comes from each emitter's
+  `angle` ± `spread`, so a fountain can aim anywhere (needed for Level 5 presets). Want an upward
+  "boost"? Raise `baseSpeed` or add a constant *along the aim*, not a hard-coded `vy` push.
+
+Per-particle color now flows through new `cr/cg/cb` fields on `Particle`, copied from the emitter at
+birth and faded by remaining life in `to_vertices`.
+
+### Tuning the look
+
+A clump that won't spread is usually the **mutual gravity** (`strength` in the `nbody_force_tiled`
+launch) pulling the fountains back together — set it to `0.0f` for clean separate fountains. To make
+emitters feel independent: push their `x` apart, aim them apart (`angle`), and narrow `spread`.
 
 ---
 
