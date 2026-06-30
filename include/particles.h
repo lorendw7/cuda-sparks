@@ -1,5 +1,8 @@
 #pragma once
 
+
+#define MAX_EMITTERS 8
+
 // ---------------------------------------------------------------------------
 // Particle  --  one element in the simulation
 // ---------------------------------------------------------------------------
@@ -26,6 +29,7 @@ struct SimParams {
     float restitution;  // wall bounce coefficient: 1.0 = perfect elastic, 0.0 = dead stop
     float bound;        // world boundary half-size; positions clamp to [-bound, bound]
     int   n;            // total number of particles
+    float nbodyStrength;  // mutual-gravity strength for the n-body force (0 = off)
 };
 
 // ---------------------------------------------------------------------------
@@ -43,4 +47,13 @@ struct Emitter {
     float baseSpeed;   // base launch speed (jittered per particle)
     float r, g, b;     // color given to this emitter's particles
     float lifetime;    // how long its particles live (seconds)
+};
+
+
+struct Preset
+{
+    Emitter emitters[MAX_EMITTERS];
+    int numEmitters;
+    float gravity;
+    float nbodyStrength;
 };

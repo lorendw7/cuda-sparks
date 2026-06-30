@@ -26,6 +26,8 @@ public:
     // Advance the whole system by dt: launch the kernel, then copy results back.
     void update(float dt);
 
+    void set_preset(int i);
+
     // Pack the latest particle data into interleaved [x,y,r,g,b] vertices.
     void to_vertices(std::vector<float>& out) const;
 

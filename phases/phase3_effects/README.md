@@ -17,6 +17,7 @@ From this phase on, **you write all of the code** — the kernels, the launches,
 | **2 — Naive N-body** ✅ | Every particle attracts every other particle | an `O(n^2)` loop in the kernel; splitting force/integrate kernels to avoid a data race |
 | **3 — Shared memory** ✅ | The same N-body, but fast | `__shared__` memory + tiling + `__syncthreads()` |
 | **4 — Multiple emitters** ✅ | Several independent fountains, each its own style | `__constant__` memory + a data-driven `Emitter` table |
+| **5 — Effect presets** ✅ | Switch fireworks / fire / nebula with keys 1/2/3 | bundling emitters + physics into a `Preset`; re-uploading `__constant__` at runtime; GLFW key input |
 
 ---
 
@@ -164,9 +165,56 @@ birth and faded by remaining life in `to_vertices`.
 
 ### Tuning the look
 
-A clump that won't spread is usually the **mutual gravity** (`strength` in the `nbody_force_tiled`
-launch) pulling the fountains back together — set it to `0.0f` for clean separate fountains. To make
-emitters feel independent: push their `x` apart, aim them apart (`angle`), and narrow `spread`.
+A clump that won't spread is usually the **mutual gravity** (`nbodyStrength` in the
+`nbody_force_tiled` launch) pulling the fountains back together — set it to `0.0f` for clean separate
+fountains. To make emitters feel independent: push their `x` apart, aim them apart (`angle`), and
+narrow `spread`.
+
+---
+
+## Level 5 — Effect presets
+
+A **preset** bundles a whole "look" into one struct: an emitter table *plus* the physics that goes
+with it (`gravity`, `nbodyStrength`). Three presets — **fireworks / fire / nebula** — live in a
+static table, and number keys `1` / `2` / `3` switch between them at runtime.
+
+```cpp
+struct Preset {
+    Emitter emitters[MAX_EMITTERS];  // this look's spawn sources (fixed-size slots)
+    int     numEmitters;             // how many slots are used
+    float   gravity;                 // physics for this look ...
+    float   nbodyStrength;           // ... bundled in with the emitters
+};
+```
+
+### The key idea — switching = re-uploading `__constant__`
+
+The device already reads spawn settings from `__constant__ d_emitters` when it recycles particles
+(Level 4). So switching presets is just **uploading a different table** with the same
+`cudaMemcpyToSymbol` calls, plus copying the preset's physics into the live `params_`:
+
+```cpp
+void ParticleSystem::set_preset(int i) {
+    const Preset& ps = presets[i];                 // presets[] lives on the HOST
+    params_.gravity       = ps.gravity;            // CPU -> CPU
+    params_.nbodyStrength = ps.nbodyStrength;
+    cudaMemcpyToSymbol(d_emitters, ps.emitters, ps.numEmitters * sizeof(Emitter));  // CPU -> GPU
+    cudaMemcpyToSymbol(d_numEmitters, &ps.numEmitters, sizeof(int));
+}
+```
+
+Existing particles keep their old look and only adopt the new preset as they die and respawn, so a
+switch **cross-fades** instead of snapping. The constructor just calls `set_preset(0)` to boot.
+
+### Two things worth remembering
+
+- **Host vs. device, again.** `presets[]` and `params_` live in CPU memory; `d_emitters` /
+  `d_particles_` live on the GPU. The CPU never reads `d_emitters` directly — even the initial fill
+  reads the host-side `presets[0]`. Crossing the boundary always means a `cudaMemcpy*`.
+- **Polled input fires every frame.** `glfwGetKey` returns `GLFW_PRESS` for as long as the key is
+  held, so holding `2` calls `set_preset(1)` many times — harmless, because re-selecting the same
+  preset just re-uploads the same table. Edge-triggered "next preset" cycling would need to remember
+  the previous frame's key state.
 
 ---
 
@@ -176,10 +224,10 @@ emitters feel independent: push their `x` apart, aim them apart (`angle`), and n
 .\build.bat run3
 ```
 
-You should see a glowing cyan-to-magenta cloud of particles clumping under their mutual gravity.
-Tune the look by editing:
+It boots on the **fireworks** preset. Press `1` / `2` / `3` to switch between fireworks, fire, and
+nebula. Tune the look by editing:
 
-- `strength` in the `update()` launch (N-body force; start around `0.0001f`),
-- `params.gravity` in `main.cpp` (set to `0.0f` to drop the downward pull and let N-body dominate),
+- the `presets[]` table in `particle_system.cu` (emitter rows + per-preset `gravity` /
+  `nbodyStrength`),
 - `kNumParticles` in `main.cpp` (raise it to feel the `O(n^2)` slowdown),
-- the color line in `to_vertices` (interpolated by lifetime `t`).
+- the color line in `to_vertices` (per-particle `cr/cg/cb` faded by lifetime `t`).

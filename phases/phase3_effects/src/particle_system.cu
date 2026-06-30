@@ -6,18 +6,55 @@
 #include <cmath>
 
 // ===========================================================================
-// Emitter table in __constant__ memory  (Level 4)
+// Emitter table in __constant__ memory  (Level 4, re-uploaded by Level 5)
 // ===========================================================================
 // A small, read-only table every thread consults to know where/how to spawn a
 // particle. __constant__ lives in a special cached GPU region: when a warp's 32
 // threads read the same address, the hardware fetches once and broadcasts it.
 // It is NOT cudaMalloc'd -- it is a fixed global symbol that already exists on
-// the device. The host fills it once with cudaMemcpyToSymbol (Step 5).
+// the device. The host fills it with cudaMemcpyToSymbol: once at startup, and
+// again every time set_preset() switches the active preset (Level 5).
 // ===========================================================================
-#define MAX_EMITTERS 8
 __constant__ Emitter d_emitters[MAX_EMITTERS];
 __constant__ int d_numEmitters;
 
+// ===========================================================================
+// Preset table (Level 5)  --  three complete "looks", switched by keys 1/2/3.
+// ===========================================================================
+// Each row bundles an emitter table + physics. set_preset() copies a row's
+// physics into params_ and re-uploads its emitters into __constant__ memory;
+// recycled particles then adopt the new look, so switches cross-fade naturally.
+//   Emitter fields:  { x, y, angle, spread, baseSpeed, r, g, b, lifetime }
+//   Preset fields:   { { emitters... }, numEmitters, gravity, nbodyStrength }
+//   0 = fireworks (scattered full-circle bursts, falls under gravity)
+//   1 = fire      (bottom sources aimed up, warm, negative gravity = buoyancy)
+//   2 = nebula    (slow wide cold drift, weak mutual gravity swirls it together)
+// ===========================================================================
+static const Preset presets[] = {
+    {{
+         {-0.5f, 0.3f, 0.0f, 6.2832f, 1.2f, 1.0f, 0.2f, 0.2f, 4.0f}, // red burst, upper-left
+         {0.5f, 0.4f, 0.0f, 6.2832f, 1.2f, 0.2f, 0.6f, 1.0f, 4.0f},  // blue burst, upper-right
+         {0.0f, -0.2f, 0.0f, 6.2832f, 1.2f, 1.0f, 0.9f, 0.3f, 4.0f}, // gold burst, center
+     },
+     3,
+     0.6f,
+     0.0f},
+    {{
+         {-0.15f, -0.8f, 1.5708f, 0.5f, 0.7f, 1.0f, 0.3f, 0.05f, 3.0f}, // deep red
+         {0.0f, -0.8f, 1.5708f, 0.5f, 0.8f, 1.0f, 0.6f, 0.1f, 3.0f},    // orange
+         {0.15f, -0.8f, 1.5708f, 0.5f, 0.7f, 1.0f, 0.85f, 0.2f, 3.0f},  // yellow
+     },
+     3,
+     -0.35f,
+     0.0f},
+    {{
+         {-0.3f, 0.0f, 0.0f, 6.2832f, 0.15f, 0.3f, 0.4f, 1.0f, 8.0f}, // blue cloud
+         {0.3f, 0.0f, 0.0f, 6.2832f, 0.15f, 0.7f, 0.3f, 1.0f, 8.0f},  // purple cloud
+     },
+     2,
+     0.0f,
+     0.00002f},
+};
 // ===========================================================================
 // emitter_spawn  --  birth a particle from a given emitter.  (given helper)
 // ===========================================================================
@@ -212,6 +249,32 @@ __global__ void update_kernel(Particle *particles, int n, SimParams params, floa
 }
 
 // ===========================================================================
+// set_preset  --  switch the active effect preset.  (Level 5)
+// ===========================================================================
+// Loads preset i's physics into params_ (read by update() next frame) and
+// re-uploads its emitter table into __constant__ d_emitters (read by the device
+// when it recycles particles). Existing particles keep flying with their old
+// look and only adopt the new one as they die and respawn, so the change
+// cross-fades instead of snapping. i is clamped, so a stray key can't index out
+// of the table. Called once at startup (preset 0) and on each 1/2/3 key press.
+// ===========================================================================
+void ParticleSystem::set_preset(int i)
+{
+    // Number of presets, computed from the table so adding a row needs no edit here.
+    int count = (int)(sizeof(presets) / sizeof(presets[0]));
+    if (i < 0) i = 0;
+    if (i >= count) i = count - 1;
+
+    const Preset& ps = presets[i];
+
+    // Physics: CPU -> CPU copy into our live params_.
+    params_.gravity = ps.gravity;
+    params_.nbodyStrength = ps.nbodyStrength;
+
+    CUDA_CHECK(cudaMemcpyToSymbol(d_emitters, ps.emitters, ps.numEmitters * sizeof(Emitter)));
+      CUDA_CHECK(cudaMemcpyToSymbol(d_numEmitters, &ps.numEmitters, sizeof(int)));
+}
+// ===========================================================================
 // GPU memory management  --  allocate / copy / free the device arrays.
 // ===========================================================================
 // The CPU and GPU have separate memory. The constructor allocates the device
@@ -224,27 +287,19 @@ ParticleSystem::ParticleSystem(const SimParams &p)
 {
     gpu_info(); // (given) print which GPU we are on
 
-    // Build the emitter table on the HOST (the CPU cannot read __constant__
-    // memory). Each row is { x, y, angle, spread, baseSpeed, r, g, b, lifetime }.
-    // Three independent fountains: positions pushed to the sides and aimed apart
-    // (left fans up-left, right fans up-right) so they do not overlap into a blob.
-    std::vector<Emitter> emitters;
-    emitters.push_back({-0.8f, -0.6f, 2.1f, 0.8f, 0.9f, 1.0f, 0.3f, 0.2f, 6.0f});   // left,   red,    aims up-left
-    emitters.push_back({0.0f, -0.6f, 1.5708f, 0.8f, 0.9f, 0.2f, 1.0f, 0.9f, 6.0f}); // middle, cyan,   aims straight up
-    emitters.push_back({0.8f, -0.6f, 1.1f, 0.8f, 0.9f, 0.7f, 0.3f, 1.0f, 6.0f});    // right,  purple, aims up-right
-    int numEmitters = (int)emitters.size();
-
-    // Upload the table into __constant__ memory by SYMBOL name (not a pointer).
-    CUDA_CHECK(cudaMemcpyToSymbol(d_emitters, emitters.data(), numEmitters * sizeof(Emitter)));
-    CUDA_CHECK(cudaMemcpyToSymbol(d_numEmitters, &numEmitters, sizeof(int)));
+    // Start on preset 0: fills params_ (gravity/nbodyStrength) AND uploads
+    // preset 0's emitter table into __constant__ memory for the device to read.
+    set_preset(0);
 
     // Allocate the particle array in GPU memory.
     CUDA_CHECK(cudaMalloc(&d_particles_, (size_t)n_ * sizeof(Particle)));
 
-    // Build the starting state on the CPU (given).
+    // Build the starting state on the CPU. emitter_spawn runs on the HOST, which
+    // cannot read the __constant__ table -- so read the host-side preset directly.
+    const Preset& ps = presets[0];
     host_.resize(n_);
     for (int i = 0; i < n_; ++i)
-        emitter_spawn(host_[i], i, emitters[i % numEmitters]);
+        emitter_spawn(host_[i], i, ps.emitters[i % ps.numEmitters]);
 
     // Copy the initial array up to the GPU (Host -> Device).
     CUDA_CHECK(cudaMemcpy(d_particles_, host_.data(), (size_t)n_ * sizeof(Particle), cudaMemcpyHostToDevice));
@@ -271,7 +326,7 @@ void ParticleSystem::update(float dt)
 
     // Phase 1 -- N-body (shared-memory tiled): read every position through a
     // 256-wide shared tile, accumulate gravity, write velocities only.
-    nbody_force_tiled<<<grid, block>>>(d_particles_, n_, 0.00001f, dt);
+    nbody_force_tiled<<<grid, block>>>(d_particles_, n_, params_.nbodyStrength, dt);
     CUDA_CHECK(cudaGetLastError());
 
     // Phase 2 -- integrate: all velocities are now final, so move the positions,

@@ -1,9 +1,12 @@
 // ===========================================================================
-// Phase 3 - Effects.   (Framework code - you do not need to edit this.)
+// Phase 3 - Effects.
 // ===========================================================================
 // This file is IDENTICAL in shape to Phase 1's main.cpp. That is the lesson:
 // the application does not care whether the physics runs on the CPU or the GPU.
 // All the CUDA lives inside ParticleSystem (particle_system.cu).
+//
+// Level 5 adds the only interactive bit: the main loop polls number keys 1/2/3
+// each frame and calls sim.set_preset() to switch the active effect preset.
 //
 // The title bar shows particle count + FPS + update time. Compare these numbers
 // against your Phase 1 baseline -- especially after you bump kNumParticles up.
@@ -87,6 +90,14 @@ int main() {
         renderer.draw();
         glfwSwapBuffers(window);
         glfwPollEvents();
+
+        // --- preset switching: number keys 1/2/3 pick a preset ---
+        // glfwGetKey returns GLFW_PRESS while the key is held, so this fires every
+        // frame the key is down -- harmless here, since re-selecting the same
+        // preset just re-uploads the same table.
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) sim.set_preset(0);
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) sim.set_preset(1);
+        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) sim.set_preset(2);
 
         ++frames;
         if (std::chrono::duration<float>(now - fps_time).count() >= 0.5f) {
