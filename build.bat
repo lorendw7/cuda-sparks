@@ -51,5 +51,9 @@ if "%1"=="run3" (
     echo.
     "%BUILD_DIR%\phases\phase3_effects\phase3.exe"
 )
+if "%1"=="run4" (
+    echo.
+    "%BUILD_DIR%\phases\phase4_one_million\phase4.exe"
+)
 
 endlocal

@@ -96,8 +96,12 @@ Phase 1 (CPU)   ✅ L1 physics  ✅ L2 bounce  ✅ L3 shaders
 Phase 2 (CUDA)  ✅ L1 kernel + memory  ✅ L2 curand  ✅ L3 measure speedup
 Phase 3         ✅ L1 gravity well  ✅ L2 naive N-body (O(n^2))  ✅ L3 __shared__ tiling
                 ✅ L4 multiple emitters (__constant__)  ✅ L5 effect presets (keys 1/2/3)
-Phase 4         ▶  1,000,000 particles + Nsight profiling; rendering layer built from scratch
+Phase 4         ▶  L1 scale to 1M + measure the bottleneck (in progress)
+                   then CUDA–OpenGL interop, SoA, Nsight; rendering layer built from scratch
+Phase 5         ·  procedurally-generated audio: event SFX → ambient beds → audio-reactive
 ```
+
+The project has **five phases** in total (CPU → CUDA → effects → one million → audio).
 
 ---
 

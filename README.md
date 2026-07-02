@@ -2,10 +2,10 @@
 
 Build a real-time GPU particle system from scratch — and learn CUDA along the way.
 
-We go in four phases, from a pure-CPU baseline all the way to **1,000,000 particles** running
-smoothly on the GPU. Each phase has a working program you can run, and the parts where the real
-learning happens are left for **you** to write. The framework (windowing, OpenGL rendering, build
-system, timing) is provided so you can focus on the compute.
+We go in five phases, from a pure-CPU baseline through **1,000,000 particles** running smoothly on
+the GPU and on to procedurally-generated, audio-reactive sound. Each phase has a working program you
+can run, and the parts where the real learning happens are left for **you** to write. The framework
+(windowing, OpenGL rendering, build system, timing) is provided so you can focus on the compute.
 
 > **How the teaching works**
 > - All docs (READMEs, references) and code comments are English-only (ASCII).
@@ -24,7 +24,8 @@ system, timing) is provided so you can focus on the compute.
 | **1 — CPU Baseline** | 10,000 particles on the CPU, rendered with OpenGL | C++ sim loop, OpenGL points, frame timing, a reference benchmark | `ParticleSystem::update()` on the CPU |
 | **2 — CUDA Migration** | Move the physics to a GPU kernel | `cudaMalloc` / `cudaMemcpy`, thread indexing, `curandState` RNG, your first speedup | the update **kernel** + init **kernel** |
 | **3 — Effects** | Gravity, collisions, color fade by lifetime | `__shared__` memory, tiling, `__syncthreads()` | force & interaction kernels |
-| **4 — One Million** | 1,000,000 particles at interactive frame rates | CUDA–OpenGL interop, profiling with **Nsight**, memory-layout (SoA) optimization | the optimized pipeline |
+| **4 — One Million** | 1,000,000 particles at interactive frame rates | CUDA–OpenGL interop, profiling with **Nsight**, memory-layout (SoA) optimization | the optimized pipeline **and the rendering layer from scratch** |
+| **5 — Audio** | Procedurally-generated, audio-reactive sound | real-time audio with miniaudio, code-synthesized SFX, driving sound from live sim state | the audio layer (event → ambient → reactive) |
 
 Phase 1 is in [`phases/phase1_cpu_baseline/`](phases/phase1_cpu_baseline/). Each later phase appears
 as you finish the one before it.
