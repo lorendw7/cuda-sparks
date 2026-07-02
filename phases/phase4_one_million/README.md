@@ -68,6 +68,73 @@ straight into the OpenGL buffer so the CPU never touches particle data.
 - Deliverable: a short "what I changed and how much each helped" summary at the bottom of
   this README.
 
+### L5 — Effects & presets, rebuilt from scratch
+
+Phase 3 handed you the effect system as working code. Here you **re-implement every
+visual style yourself** on top of the fast 1M architecture — so you own the whole look,
+not just the plumbing. Build these in order, testing each before the next:
+
+1. **Emitters** — a data-driven `Emitter` table in `__constant__` memory; assign each
+   particle to one emitter and spawn/recycle from its position / aim / spread / speed /
+   color / lifetime.
+2. **Staggered lifetimes** — give the initial population *randomised* remaining life so
+   particles don't all die on the same frame. Without this the cloud pulses in waves;
+   with it you get one continuous stream. (One line, big visual difference.)
+3. **Physics forces** — write each force as its own clearly-named term in the update
+   kernel and understand what shape it produces:
+   - `gravity` (global up/down),
+   - `nbodyStrength` (mutual attraction — collapses toward the center),
+   - `swirl` (tangential/vortex force around the origin — makes particles *orbit* and
+     wind into spiral arms; the key that mutual gravity alone can't produce).
+4. **Presets** — bundle an emitter table + those physics knobs into a `Preset` struct,
+   hold a table of them, and switch with number keys (re-upload the emitter table via
+   `cudaMemcpyToSymbol` on each switch).
+5. **Design your own look** — invent at least one preset that is *not* a port of
+   fireworks / fire / nebula (e.g. a galaxy, a fountain, rain, an explosion). Pick the
+   forces and emitter layout that produce it. This is the "you can now build any style"
+   checkpoint.
+
+### L6 — Realistic simulation & randomness
+
+Phase 3's presets look "busy" because they use one shortcut model: a fixed pool of
+particles that **instantly respawns at a fixed emitter the moment it dies** — a permanent
+fountain, never a real event. Here you replace that with genuine, per-style physical
+models and make every style feel alive with randomness. This is where the sim stops
+looking procedural and starts looking real.
+
+1. **Episodic *shell* bursts (real fireworks)** — the headline change. Instead of
+   continuous emission:
+   - Split the particle pool into **shells** (groups that share one explosion).
+   - A shell's particles are all born **together, at one random point, at one instant**,
+     fly outward, then die together — after which the shell stays **dark for a random
+     gap** before re-launching somewhere new. Bursts appear, expand, fade, vanish, pause.
+   - Needs either a small per-shell state array (center + countdown timer, advanced by a
+     tiny kernel each frame) or a stateless analytic model (each particle computes which
+     burst it belongs to from time + shell id). Decide the trade-off yourself.
+   - Add **air drag** (`damping`: `v *= damping` each step, ~0.98) so sparks expand fast
+     then decelerate and arc down under gravity — the classic firework trajectory.
+
+2. **Per-style realistic models** — give each look its own honest physics, not just
+   re-skinned emitters:
+   - **Fire** — buoyant rise + turbulence (a curl/noise force that wavers left/right),
+     color cooling from white→orange→red→smoke as the particle ages.
+   - **Rain / snow** — steady downward field with wind, size/speed variation, splash on
+     the floor.
+   - **Galaxy** — swirl + weak inward pull tuned so orbits are stable (spiral arms that
+     persist instead of collapsing).
+   - **Explosion / smoke** — one impulsive radial burst + drag + rising, expanding,
+     fading smoke.
+
+3. **Randomness everywhere** — replace the remaining hard-coded, index-derived "fake"
+   randomness with real per-particle RNG so no two runs (and no two particles) look
+   identical: jittered spawn position, launch angle, speed, lifetime, size, and color;
+   randomised burst timing and location. Understand why a *per-particle* `curandState`
+   stream is what makes a million particles look organic rather than mechanical.
+
+> Reference only if stuck: Phase 3's `particle_system.cu` has a working version of the
+> *continuous* model (emitters, staggered life, gravity/nbody/swirl). L5/L6 go beyond it —
+> try each step from the spec first, peek afterward to compare.
+
 ---
 
 ## Files you'll write from scratch in `src/`
@@ -94,3 +161,5 @@ straight into the OpenGL buffer so the CPU never touches particle data.
 - [ ] L2 CUDA–OpenGL interop
 - [ ] L3 SoA layout
 - [ ] L4 Nsight profiling
+- [ ] L5 Effects & presets from scratch (emitters, staggered life, gravity/nbody/swirl, your own look)
+- [ ] L6 Realistic simulation & randomness (episodic shell bursts, per-style physics, full per-particle RNG)
