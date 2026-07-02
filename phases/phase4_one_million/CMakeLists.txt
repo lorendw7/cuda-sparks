@@ -4,7 +4,7 @@
 
 add_executable(phase4
     src/main.cpp
-    # src/renderer.cpp
+    src/renderer.cpp
     # src/particle_system.cu
 )
 

@@ -157,6 +157,10 @@ looking procedural and starts looking real.
 - [x] L0 Rendering layer from scratch — hand-built the modern OpenGL pipeline
       (VBO + VAO + vertex/fragment shaders + shader program) and drew a first
       triangle with `glDrawArrays`. The base every later level builds on.
+- [x] Renderer refactored into a reusable `Renderer` class (RAII: init/upload/
+      draw + destructor, non-copyable) drawing `GL_POINTS` from interleaved
+      `[x,y,r,g,b]` vertices. `main.cpp` wires it up and draws 4 test points to
+      verify the pipeline before the particle system exists.
 - [ ] L1 Scale to 1M & measure the bottleneck
 - [ ] L2 CUDA–OpenGL interop
 - [ ] L3 SoA layout
