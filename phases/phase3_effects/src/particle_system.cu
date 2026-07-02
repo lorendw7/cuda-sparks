@@ -31,29 +31,36 @@ __constant__ int d_numEmitters;
 //   2 = nebula    (slow wide cold drift, weak mutual gravity swirls it together)
 // ===========================================================================
 static const Preset presets[] = {
+    // fireworks: full-circle bursts, hang in the air, faint mutual pull, no swirl.
     {{
          {-0.5f, 0.3f, 0.0f, 6.2832f, 1.2f, 1.0f, 0.2f, 0.2f, 4.0f}, // red burst, upper-left
          {0.5f, 0.4f, 0.0f, 6.2832f, 1.2f, 0.2f, 0.6f, 1.0f, 4.0f},  // blue burst, upper-right
          {0.0f, -0.2f, 0.0f, 6.2832f, 1.2f, 1.0f, 0.9f, 0.3f, 4.0f}, // gold burst, center
      },
      3,
-     0.6f,
-     0.0f},
+     0.45f,
+     0.000012f,
+     0.4f},
+    // fire: tight upward jets (narrow spread), buoyant (negative gravity), continuous.
     {{
-         {-0.15f, -0.8f, 1.5708f, 0.5f, 0.7f, 1.0f, 0.3f, 0.05f, 3.0f}, // deep red
-         {0.0f, -0.8f, 1.5708f, 0.5f, 0.8f, 1.0f, 0.6f, 0.1f, 3.0f},    // orange
-         {0.15f, -0.8f, 1.5708f, 0.5f, 0.7f, 1.0f, 0.85f, 0.2f, 3.0f},  // yellow
+         {-0.15f, -0.9f, 1.5708f, 0.28f, 0.9f, 1.0f, 0.3f, 0.05f, 3.0f}, // deep red
+         {0.0f, -0.9f, 1.5708f, 0.28f, 1.0f, 1.0f, 0.6f, 0.1f, 3.0f},    // orange
+         {0.15f, -0.9f, 1.5708f, 0.28f, 0.9f, 1.0f, 0.85f, 0.2f, 3.0f},  // yellow
      },
      3,
-     -0.35f,
+     -0.5f,
+     0.000006f,
      0.0f},
+    // nebula: slow wide cold drift + strong vortex (swirl) + gentle inward pull
+    //         (weak nbody) -> particles ORBIT the center and wind into spiral arms.
     {{
-         {-0.3f, 0.0f, 0.0f, 6.2832f, 0.15f, 0.3f, 0.4f, 1.0f, 8.0f}, // blue cloud
-         {0.3f, 0.0f, 0.0f, 6.2832f, 0.15f, 0.7f, 0.3f, 1.0f, 8.0f},  // purple cloud
+         {-0.3f, 0.0f, 0.0f, 6.2832f, 0.15f, 0.3f, 0.4f, 1.0f, 9.0f}, // blue cloud
+         {0.3f, 0.0f, 0.0f, 6.2832f, 0.15f, 0.7f, 0.3f, 1.0f, 9.0f},  // purple cloud
      },
      2,
      0.0f,
-     0.00002f},
+     0.000015f,
+     1.2f},
 };
 // ===========================================================================
 // emitter_spawn  --  birth a particle from a given emitter.  (given helper)
@@ -81,7 +88,10 @@ __host__ __device__ inline void emitter_spawn(Particle &p, int i, const Emitter 
     p.cr = em.r;
     p.cg = em.g;
     p.cb = em.b;
-    p.life = em.lifetime;
+    // Stagger initial lifetimes across the population (f1 in [0,1)) so particles do
+    // NOT all age and die on the same frame. Without this the whole cloud pulses in
+    // waves; with it, deaths/respawns spread out over time -> one continuous stream.
+    p.life = em.lifetime * f1;
 }
 
 // ===========================================================================
@@ -214,6 +224,20 @@ __global__ void update_kernel(Particle *particles, int n, SimParams params, floa
 
     particles[i].vy -= params.gravity * dt;
 
+    // Vortex / swirl: push each particle along the direction PERPENDICULAR to its
+    // line to the origin. For position (x,y) the outward (radial) vector is (x,y);
+    // rotating it 90 degrees gives the tangential vector (-y, x). Adding force along
+    // (-y, x) makes particles ORBIT the center instead of falling into it -> spiral.
+    // (No divide by radius, so the perpendicular vector's length grows with distance:
+    //  outer particles get a bigger tangential kick = whole cloud rotates.)
+    if (params.swirl != 0.0f)
+    {
+        float sx = -particles[i].y;
+        float sy =  particles[i].x;
+        particles[i].vx += sx * params.swirl * dt;
+        particles[i].vy += sy * params.swirl * dt;
+    }
+
     particles[i].x += particles[i].vx * dt;
     particles[i].y += particles[i].vy * dt;
 
@@ -270,6 +294,7 @@ void ParticleSystem::set_preset(int i)
     // Physics: CPU -> CPU copy into our live params_.
     params_.gravity = ps.gravity;
     params_.nbodyStrength = ps.nbodyStrength;
+    params_.swirl = ps.swirl;
 
     CUDA_CHECK(cudaMemcpyToSymbol(d_emitters, ps.emitters, ps.numEmitters * sizeof(Emitter)));
       CUDA_CHECK(cudaMemcpyToSymbol(d_numEmitters, &ps.numEmitters, sizeof(int)));

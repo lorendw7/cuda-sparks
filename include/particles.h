@@ -30,6 +30,8 @@ struct SimParams {
     float bound;        // world boundary half-size; positions clamp to [-bound, bound]
     int   n;            // total number of particles
     float nbodyStrength;  // mutual-gravity strength for the n-body force (0 = off)
+    float swirl;          // vortex strength: tangential force around the origin (0 = off).
+                          // Positive spins particles counter-clockwise -> spiral galaxy look.
 };
 
 // ---------------------------------------------------------------------------
@@ -56,4 +58,5 @@ struct Preset
     int numEmitters;
     float gravity;
     float nbodyStrength;
+    float swirl;          // vortex strength copied into SimParams by set_preset()
 };
