@@ -64,6 +64,21 @@ round trip (36 MB down + CPU repack + 20 MB up). This is the wall L2 tears out.
 - This is the biggest architectural change in Phase 4 and the key to the frame rate
   recovering.
 
+**Result (1,000,000 particles, same scene as L1, RTX 5070 Ti Laptop, uncapped vsync):**
+
+| build | `update` ms | FPS | note |
+| ----- | ----------- | --- | ---- |
+| L1 (round trip) | ~19 (update+pack+upload) | ~52 | 36 MB D2H + CPU pack + 20 MB upload every frame |
+| **L2 (interop)** | **~0.9, settling to ~0.07** | **~1000+** | kernel writes vertices straight into the VBO; **0 bytes over PCIe** |
+
+~20–250× faster. `update` now measures only the CUDA launch + map/unmap sync — the
+physics itself. The remaining per-frame cost has moved off the sim entirely (into
+`draw` / buffer swap), which is what L4's Nsight pass will dissect.
+
+> Cleanup still owed (does not affect correctness): `host_` is now only used by the
+> constructor for the initial fill, and `to_vertices()` / `Renderer::upload()` are
+> dead code. We keep them until L3 rewrites this layer for SoA, then delete in one pass.
+
 ### L3 — Structure of Arrays (SoA)
 
 - Split the array-of-structs `struct Particle{ x,y,vx,vy,... }` (AoS) into **one array per
@@ -178,7 +193,11 @@ looking procedural and starts looking real.
       update ~7.3 ms / pack ~4.0 ms / upload ~7.7 ms, ~52 FPS. Round trip
       confirmed as the bottleneck; physics itself is <1 ms. Default look for now =
       full-screen scatter + gravity (throwaway scaffolding, replaced by L2's rewrite).
-- [ ] L2 CUDA–OpenGL interop
+- [x] L2 CUDA–OpenGL interop — kernel writes vertices straight into the VBO
+      (`register_vbo` once + per-frame map/get-pointer/launch/unmap in `update`).
+      Deleted the per-frame `cudaMemcpy` round trip. Result: `update` ~19 ms → ~0.9 ms
+      (settling to ~0.07 ms), ~52 FPS → ~1000+ FPS. `host_`/`to_vertices`/`upload` left
+      as dead code, deleted in L3's SoA rewrite.
 - [ ] L3 SoA layout
 - [ ] L4 Nsight profiling
 - [ ] L5 Effects & presets from scratch (emitters, staggered life, gravity/nbody/swirl, your own look)

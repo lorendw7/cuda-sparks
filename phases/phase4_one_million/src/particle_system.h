@@ -1,5 +1,5 @@
 #pragma once
-#include "particles.h"   // Particle, SimParams (shared include/ folder)
+#include "particles.h" // Particle, SimParams (shared include/ folder)
 #include <vector>
 
 // ===========================================================================
@@ -13,24 +13,27 @@
 // Plain C++ header (no CUDA syntax) so the host compiler can include it; the
 // actual kernels live in particle_system.cu.
 // ===========================================================================
-class ParticleSystem   // NOTE: rename to ParticleSystem to match project convention
+struct cudaGraphicsResource;
+
+class ParticleSystem // NOTE: rename to ParticleSystem to match project convention
 {
 private:
-    SimParams              params_;                  // simulation config (dt, gravity, bound, n...)
-    int                    n_ = 0;                   // total particle count
-    Particle*              d_particles_ = nullptr;   // GPU pointer (device memory) -- the kernel works on this
-    std::vector<Particle>  host_;                    // CPU mirror, refilled every frame for rendering
+    SimParams params_;                // simulation config (dt, gravity, bound, n...)
+    int n_ = 0;                       // total particle count
+    Particle *d_particles_ = nullptr; // GPU pointer (device memory) -- the kernel works on this
+    std::vector<Particle> host_;      // CPU mirror, refilled every frame for rendering
+    cudaGraphicsResource *vbo_resource_ = nullptr;
 
 public:
     // Constructor: cudaMalloc the device array, build the initial state on the
     // CPU, and upload it to the GPU. explicit forbids implicit SimParams->System.
-    explicit ParticleSystem(const SimParams& p);
+    explicit ParticleSystem(const SimParams &p);
 
     // Destructor: cudaFree the device array (RAII -- no manual cleanup at call site).
     ~ParticleSystem();
 
     // Particle count. const: reads a member, modifies nothing.
-    int size() const {return n_;};   // BUG: missing ';' -> should be { return n_; }
+    int size() const { return n_; }; // BUG: missing ';' -> should be { return n_; }
 
     // Advance the whole system by dt: launch the kernel, then cudaMemcpy the
     // results back into host_. Not const -- it mutates device + host state.
@@ -38,5 +41,7 @@ public:
 
     // Pack the latest host_ data into interleaved [x,y,r,g,b] vertices in out.
     // const: only reads our members; writes solely to the out-parameter.
-    void to_vertices(std::vector<float>& out) const;
+    void to_vertices(std::vector<float> &out) const;
+
+    void register_vbo(unsigned int vbo_id);
 };

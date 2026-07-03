@@ -44,4 +44,6 @@ public:
 
     // Draw the most recently uploaded particles. Call once per frame.
     void draw();
+
+    unsigned int vbo() const {return vbo_;}
 };

@@ -4,6 +4,9 @@
 #include <cuda_runtime.h>
 #include <cmath> // floorf
 
+#include <glad/gl.h>
+#include <cuda_gl_interop.h>
+
 // ===========================================================================
 // spawn  --  build one particle from its index i.  (host + device)
 // ===========================================================================
@@ -35,13 +38,16 @@ __host__ __device__ inline void spawn(Particle &p, int i, float bound)
 }
 
 // ===========================================================================
-// update_kernel  --  advance one particle per thread.  (runs every frame)
+// update_kernel  --  advance one particle AND write its vertex.  (every frame)
 // ===========================================================================
 // One GPU thread per particle: apply gravity, integrate position, bounce off
-// the 4 walls, age, and recycle the dead. params is passed BY VALUE (a copy per
-// thread) -- use params.gravity (dot), never params_ (that member is invisible here).
+// the 4 walls, age, recycle the dead -- then (L2 interop) pack the result as
+// [x,y,r,g,b] straight into the OpenGL VBO via the mapped pointer `vbo`. No copy
+// to the CPU: physics and vertex output both land in device memory this frame.
+// params is passed BY VALUE (a copy per thread) -- use params.gravity (dot),
+// never params_ (that member is invisible here).
 // ===========================================================================
-__global__ void update_kernel(Particle *particles, int n, SimParams params, float dt)
+__global__ void update_kernel(Particle *particles, float *vbo, int n, SimParams params, float dt)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x; // global thread id = particle index
     if (i >= n)                                    // grid usually rounds up past n:
@@ -75,17 +81,38 @@ __global__ void update_kernel(Particle *particles, int n, SimParams params, floa
         particles[i].vy = -particles[i].vy * params.restitution;
     }
 
-    particles[i].life -= dt;         // age this particle
-    if (particles[i].life <= 0.0f)   // dead? recycle it in place (deterministic)
+    particles[i].life -= dt;       // age this particle
+    if (particles[i].life <= 0.0f) // dead? recycle it in place (deterministic)
     {
         spawn(particles[i], i, params.bound);
     }
+
+    // --- Write this particle's vertex straight into the VBO (must be AFTER the
+    // recycle above, so a just-reborn particle emits its NEW position/color, not
+    // the stale dead one). fade dims the color toward death; clamp to [0,1]
+    // because a freshly spawned particle's life can exceed 1.
+    float fade = particles[i].life;
+    if (fade < 0.0f)
+    {
+        fade = 0.0f;
+    }
+    if (fade > 1.0f)
+    {
+        fade = 1.0f;
+    }
+
+    float *v = &vbo[i * 5];          // this particle's 5 floats inside the VBO
+    v[0] = particles[i].x;           // attribute 0 (pos.x) -- shader reads offset 0
+    v[1] = particles[i].y;           // attribute 0 (pos.y)
+    v[2] = particles[i].cr * fade;   // attribute 1 (color.r) -- shader reads offset 8
+    v[3] = particles[i].cg * fade;   // attribute 1 (color.g)
+    v[4] = particles[i].cb * fade;   // attribute 1 (color.b)
 }
 
 // ===========================================================================
 // Constructor  --  allocate device memory, build initial state, upload it.
 // ===========================================================================
-ParticleSystem::ParticleSystem(const SimParams& p) // definition of the ctor declared in the header
+ParticleSystem::ParticleSystem(const SimParams &p) // definition of the ctor declared in the header
     : params_(p), n_(p.n)                          // member-init list: fill params_ and n_ first
 {
     gpu_info(); // print which GPU we're on (from cuda_utils.h)
@@ -107,28 +134,76 @@ ParticleSystem::ParticleSystem(const SimParams& p) // definition of the ctor dec
                           cudaMemcpyHostToDevice)); // direction flag: source is host, dest is device
 }
 
-// Destructor: every cudaMalloc needs a matching cudaFree.
-ParticleSystem::~ParticleSystem()
+// ===========================================================================
+// register_vbo  --  hand the OpenGL VBO to CUDA.  (called ONCE, at startup)
+// ===========================================================================
+// One-time handshake: CUDA asks the GL driver for the VBO's physical address,
+// size and format, and records them in vbo_resource_ -- a proxy handle for this
+// GL buffer in the CUDA world. Registration is expensive (cross-driver
+// negotiation), so it lives here, never in the per-frame loop.
+//
+// Must run AFTER renderer.init(): the VBO has to already exist (glGenBuffers +
+// glBufferData with non-zero size) or this fails with cudaErrorInvalidValue.
+// WriteDiscard = "the kernel overwrites every vertex each frame and never reads
+// the old ones", letting the driver skip preserving previous contents.
+// ===========================================================================
+void ParticleSystem::register_vbo(unsigned int vbo_id)
 {
-    cudaFree(d_particles_);
+    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(
+        &vbo_resource_,                       // out: proxy handle written here
+        vbo_id,                               // in:  the GL buffer id to share
+        cudaGraphicsRegisterFlagsWriteDiscard // hint: full overwrite, no read-back
+        ));
 }
 
 // ===========================================================================
-// update  --  launch the kernel, then copy the whole array back to the CPU.
+// Destructor  --  release everything we acquired.  (RAII: automatic at scope end)
 // ===========================================================================
-void ParticleSystem::update(float dt) // returns nothing; its output is the mutated device + host state
+// Every acquire needs a matching release: unregister pairs with register_vbo,
+// cudaFree pairs with cudaMalloc. Unregister FIRST (undo interop) and only if we
+// actually registered -- the null guard makes the destructor safe even if the
+// object is torn down before register_vbo ran. Note we only unregister, never
+// glDeleteBuffers: CUDA borrowed the VBO, it never owned it -- the Renderer does.
+// ===========================================================================
+ParticleSystem::~ParticleSystem()
 {
-    int block = 256;                      // threads per block
-    int grid = (n_ + block - 1) / block;  // round up so every particle is covered
+    if (vbo_resource_) // only if register_vbo succeeded
+    {
+        cudaGraphicsUnregisterResource(vbo_resource_); // undo the interop registration
+    }
 
-    update_kernel<<<grid, block>>>(d_particles_, n_, params_, dt); // launch grid*block threads on the GPU
-    CUDA_CHECK(cudaGetLastError());                               // check the launch itself
+    cudaFree(d_particles_); // matching free for the ctor's cudaMalloc
+}
 
-    // Copy results Device -> Host for rendering. THIS per-frame round trip is the
-    // bottleneck L1 measures and L2 removes.
-    CUDA_CHECK(cudaMemcpy(host_.data(), d_particles_,
-                          (size_t)n_ * sizeof(Particle), // total bytes = count * size of one Particle
-                          cudaMemcpyDeviceToHost));
+// ===========================================================================
+// update  --  map the VBO, run the kernel straight into it, unmap.  (per frame)
+// ===========================================================================
+// The L2 heart. No cudaMemcpy, no host_ mirror, no CPU pack: the kernel writes
+// vertices directly into the OpenGL VBO. map/unmap are the per-frame handshake
+// that hands the buffer GL -> CUDA and back, and also synchronise the two so the
+// kernel's writes are done before draw() reads them.
+// ===========================================================================
+void ParticleSystem::update(float dt)
+{
+    // 1) Borrow the VBO: GL -> CUDA. Waits for prior GL work on it to finish.
+    CUDA_CHECK(cudaGraphicsMapResources(1, &vbo_resource_, 0));
+
+    // 2) Get this frame's raw device pointer into the VBO (re-fetch every frame;
+    //    valid only between map and unmap). bytes = its size, which we don't need.
+    float *d_vbo = nullptr;
+    size_t bytes = 0;
+    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer(
+        (void **)&d_vbo, &bytes, vbo_resource_));
+
+    // 3) Launch: physics into d_particles_, vertices into d_vbo, in one kernel.
+    int block = 256;
+    int grid = (n_ + block - 1) / block;
+    update_kernel<<<grid, block>>>(d_particles_, d_vbo, n_, params_, dt);
+    CUDA_CHECK(cudaGetLastError());
+
+    // 4) Return the VBO: CUDA -> GL. Waits for the kernel to finish, so the
+    //    buffer is safe for draw() the moment this returns. draw() must come AFTER.
+    CUDA_CHECK(cudaGraphicsUnmapResources(1, &vbo_resource_, 0));
 }
 
 // ===========================================================================
@@ -143,7 +218,8 @@ void ParticleSystem::to_vertices(std::vector<float> &out) const // 'const' must 
     {
         const Particle &p = host_[i];
         float t = p.life; // fade factor: dim toward death
-        if (t < 0.0f) t = 0.0f;
+        if (t < 0.0f)
+            t = 0.0f;
         if (t > 1.0f)
         {
             t = 1.0f;

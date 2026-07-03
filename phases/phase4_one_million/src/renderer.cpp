@@ -87,6 +87,7 @@ bool Renderer::init(int max_particles)
     glEnable(GL_PROGRAM_POINT_SIZE);                   // let the shader's gl_PointSize take effect
     glEnable(GL_BLEND);                                // enable alpha blending (soft glowing edges)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); // new*alpha + old*(1-alpha): standard transparency
+    count_ = max_particles;
     return true;
 }
 

@@ -1,13 +1,13 @@
-// Phase 4 L1 -- window + GL context, then run the 1M-particle sim each frame
-// with three-segment timing (update / pack / upload) to locate the bottleneck.
+// Phase 4 L2 -- window + GL context, then run the 1M-particle sim each frame.
+// With CUDA-GL interop the kernel writes vertices straight into the VBO, so the
+// old GPU->CPU->GPU round trip is gone; we now time just the sim update.
 // glad must be included before glfw.
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include <cstdio>            // fprintf / printf
-#include <vector>            // std::vector holds the packed [x,y,r,g,b] vertices
 #include "renderer.h"        // our hand-written rendering layer
 #include "particle_system.h" // the 1M-particle GPU simulation
-#include <chrono>            // high_resolution_clock for the per-segment timing
+#include <chrono>            // high_resolution_clock for the per-frame timing
 
 int main()
 {
@@ -63,30 +63,25 @@ int main()
         // Renderer's VBO must be sized to hold all 1M particles.
         Renderer renderer;
         renderer.init(sim.size());
+        sim.register_vbo(renderer.vbo());
 
-        std::vector<float> verts;   // reused pack buffer (to_vertices writes here)
         const float dt = 0.016f;    // fixed physics step for stability
 
-        double accUpdate = 0.0, accPack = 0.0, accUpload = 0.0; // per-segment ms, summed
+        double accUpdate = 0.0; // sim update ms, summed over the current second
         int frames = 0;                                          // frames counted this second
         auto lastReport = std::chrono::high_resolution_clock::now(); // last time we printed
 
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
         {
-            // Four timestamps carve the frame into three measured segments.
+            // Two timestamps bracket the one segment left to measure: the sim.
             auto t0 = std::chrono::high_resolution_clock::now();
-            sim.update(dt);          // segment 1: kernel + cudaMemcpy back (GPU->CPU)
+            sim.update(dt);          // map VBO -> kernel writes physics + vertices -> unmap
             auto t1 = std::chrono::high_resolution_clock::now();
-            sim.to_vertices(verts);  // segment 2: CPU packs into [x,y,r,g,b]
-            auto t2 = std::chrono::high_resolution_clock::now();
-            renderer.upload(verts, sim.size()); // segment 3: upload VBO (CPU->GPU)
-            auto t3 = std::chrono::high_resolution_clock::now();
+          
 
-            // Accumulate each segment in milliseconds (duration<double, milli>).
+            // Accumulate the update time in milliseconds (duration<double, milli>).
             accUpdate += std::chrono::duration<double, std::milli>(t1 - t0).count();
-            accPack += std::chrono::duration<double, std::milli>(t2 - t1).count();
-            accUpload += std::chrono::duration<double, std::milli>(t3 - t2).count();
             frames++;
 
             glClearColor(0.02f, 0.02f, 0.05f, 1.0f); // dark blue background
@@ -97,14 +92,14 @@ int main()
             glfwSwapBuffers(window); // present the frame
             glfwPollEvents();        // handle close/keyboard events
 
-            // Once per second, print the average of each segment + the FPS, then reset.
-            if (std::chrono::duration<double>(t3 - lastReport).count() >= 1.0)
+            // Once per second, print the average update time + the FPS, then reset.
+            if (std::chrono::duration<double>(t1 - lastReport).count() >= 1.0)
             {
-                printf("update %.2f ms | pack %.2f ms | upload %.2f ms | %d FPS\n", // \n flushes one clean line/sec
-                accUpdate / frames, accPack / frames, accUpload / frames, frames);
-                accUpdate = accPack = accUpload = 0.0;
+                printf("update %.2f ms | %d FPS\n", // \n flushes one clean line/sec
+                accUpdate / frames, frames);
+                accUpdate = 0.0;
                 frames = 0;
-                lastReport = t3;
+                lastReport = t1;
             }
         }
     } // <- renderer destroyed here, GL context still alive
