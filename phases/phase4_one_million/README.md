@@ -153,6 +153,13 @@ not just the plumbing. Build these in order, testing each before the next:
    forces and emitter layout that produce it. This is the "you can now build any style"
    checkpoint.
 
+**Progress:** Steps 1–2 DONE — the `Emitter` table lives in `__constant__ d_emitters`,
+uploaded once via `upload_emitter()` / `cudaMemcpyToSymbol` (added `SimParams.numEmitters`).
+`spawn()` now births particle `i` from emitter `i % numEmitters`: polar `(angle ± spread,
+baseSpeed)` → Cartesian velocity, emitter position/colour, and a staggered lifetime so the
+stream is continuous, not pulsed. Constructor uploads a 2-emitter test table before
+`init_kernel`. Remaining: 3 physics forces, 4 presets + number-key switching, 5 own look.
+
 ### L6 — Realistic simulation & randomness
 
 Phase 3's presets look "busy" because they use one shortcut model: a fixed pool of
@@ -189,10 +196,30 @@ looking procedural and starts looking real.
    identical: jittered spawn position, launch angle, speed, lifetime, size, and color;
    randomised burst timing and location. Understand why a *per-particle* `curandState`
    stream is what makes a million particles look organic rather than mechanical.
+   > **Bandwidth watch (ties back to L4):** the RNG *state* is the biggest byte-mover
+   > you'll add. `curandStateXORWOW` is ~48 B/particle — bigger than all 8 current
+   > fields (32 B) combined — and the kernel reads+writes it every frame. Storing 1M of
+   > them roughly *triples* per-frame traffic. This choice (small state like Philox, or a
+   > *stateless* counter-based hash from `(id, frame)` that stores nothing) is a far
+   > larger bandwidth lever than any FP16 packing in L7. Decide it deliberately.
 
 > Reference only if stuck: Phase 3's `particle_system.cu` has a working version of the
 > *continuous* model (emitters, staggered life, gravity/nbody/swirl). L5/L6 go beyond it —
 > try each step from the spec first, peek afterward to compare.
+
+### L7 — Precision & bandwidth *(optional / stretch)*
+
+Turns L4's *diagnosis* ("the wall is total bytes moved") into a *measured result*. Do
+this only after L6, once the field set is final (L6's RNG state is the dominant term —
+see the bandwidth watch above). Not required for a working, good-looking sim; its value
+is pedagogical (learn `__half` / `__half2`) and closing L4's scientific loop.
+
+- Move perceptually-tolerant fields (`cr,cg,cb`, `life`) to `__half` — ~25% less traffic,
+  zero visible precision loss.
+- Optionally pack `(x,y)` and `(vx,vy)` as `__half2`, **computing in FP32 registers** and
+  storing FP16 — FP16 *integration* stalls (a slow particle's `vx*dt` is below the FP16
+  ULP near 1.0 and gets swallowed), so never integrate in half.
+- Re-run the L4 Nsight pass and check the hypothesis: halving bytes ≈ halving the ~164 µs.
 
 ---
 
@@ -241,5 +268,6 @@ looking procedural and starts looking real.
       specifically L2-limited (DRAM 62.9%); Achieved Occupancy 89.3% (not the
       bottleneck). Confirms L3's null result — the wall is total bytes moved, so SoA
       (same bytes, rearranged) can't help; only moving *less* data would.
-- [ ] L5 Effects & presets from scratch (emitters, staggered life, gravity/nbody/swirl, your own look)
+- [~] L5 Effects & presets from scratch — **Steps 1–2 DONE** (emitters in `__constant__` + `cudaMemcpyToSymbol` upload; `spawn` births from emitter with polar→Cartesian launch; staggered life). Remaining: physics forces, presets + number keys, invent own look
 - [ ] L6 Realistic simulation & randomness (episodic shell bursts, per-style physics, full per-particle RNG)
+- [ ] L7 Precision & bandwidth *(optional)* — FP16/`__half2` on tolerant fields, re-run L4 Nsight to confirm "fewer bytes ≈ less time"

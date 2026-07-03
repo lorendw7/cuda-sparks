@@ -49,4 +49,6 @@ public:
 
     // One-time: register the renderer's VBO with CUDA so the kernel can write it.
     void register_vbo(unsigned int vbo_id);
+
+    void upload_emitter(const Emitter*, int count);
 };

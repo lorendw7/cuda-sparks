@@ -32,6 +32,7 @@ struct SimParams {
     float nbodyStrength;  // mutual-gravity strength for the n-body force (0 = off)
     float swirl;          // vortex strength: tangential force around the origin (0 = off).
                           // Positive spins particles counter-clockwise -> spiral galaxy look.
+    int numEmitters;
 };
 
 // ---------------------------------------------------------------------------

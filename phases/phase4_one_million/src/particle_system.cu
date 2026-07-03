@@ -7,15 +7,19 @@
 #include <glad/gl.h>
 #include <cuda_gl_interop.h>
 
+__constant__ Emitter d_emitters[MAX_EMITTERS];
+
 // ===========================================================================
 // spawn  --  write particle i's initial/reborn state into the SoA arrays.
 // ===========================================================================
-// Device-only now (L3): both callers -- init_kernel (initial fill) and
-// update_kernel (recycle a dead particle) -- run on the GPU, so there is no
-// host path left. Writes p.field[i] (SoA) instead of p.field (AoS). No curand
-// yet -- randomness is faked from the index i.
+// Device-only (L3): both callers -- init_kernel (initial fill) and update_kernel
+// (recycle a dead particle) -- run on the GPU, so there is no host path left.
+// (L5) A particle is now BORN FROM AN EMITTER: particle i is assigned emitter
+// (i % numEmitters), whose recipe is read from the __constant__ d_emitters table,
+// and takes that emitter's position / aim / colour / lifetime. The jitter (spread,
+// speed, life) is still faked from the index i -- real per-particle curand is L6.
 // ===========================================================================
-__device__ inline void spawn(ParticleSoA p, int i, float bound)
+__device__ inline void spawn(ParticleSoA p, int i, int numEmitters)
 {
     // Three pseudo-random values in [0,1): index * irrational, keep the fraction.
     float f1 = i * 0.6180340f; // golden ratio
@@ -25,16 +29,32 @@ __device__ inline void spawn(ParticleSoA p, int i, float bound)
     float f3 = i * 0.9541230f;
     f3 -= floorf(f3);
 
-    p.x[i] = (f1 * 2.0f - 1.0f) * bound; // map [0,1)->[-bound,bound): scatter across x
-    p.y[i] = (f2 * 2.0f - 1.0f) * bound; // scatter across y
-    p.vx[i] = 0.0f;                      // start at rest; gravity takes over
-    p.vy[i] = 0.0f;
+    // Pick this particle's emitter and copy its recipe out of constant memory.
+    int e = i % numEmitters;    // round-robin: assign particle i to one emitter
+    Emitter em = d_emitters[e]; // broadcast read from the __constant__ table
 
-    p.cr[i] = 0.3f + 0.7f * f1; // per-particle color from index, so the field isn't flat
-    p.cg[i] = 0.3f + 0.7f * f2;
-    p.cb[i] = 1.0f;
+    // Launch direction: the emitter's central aim, jittered within its spread.
+    // (f1-0.5) is in [-0.5,0.5), so a lands in [angle - spread/2, angle + spread/2).
+    float a = em.angle + (f1 - 0.5f) * em.spread;
 
-    p.life[i] = 1.0f + f3 * 3.0f; // staggered lifetime 1..4s -> not all die on one frame
+    // Launch speed: baseSpeed scaled by a per-particle factor in [0.5,1.0).
+    float s = em.baseSpeed * (0.5f + 0.5f * f2);
+
+    // Polar (direction a, magnitude s) -> Cartesian velocity components.
+    p.vx[i] = cosf(a) * s;
+    p.vy[i] = sinf(a) * s;
+
+    // Born at the emitter's mouth, wearing the emitter's colour.
+    p.x[i] = em.x;
+    p.y[i] = em.y;
+
+    p.cr[i] = em.r;
+    p.cg[i] = em.g;
+    p.cb[i] = em.b;
+
+    // Staggered lifetime (0.7..1.0 of the emitter's lifetime) so particles from
+    // one emitter don't all die on the same frame -> a continuous stream, not a pulse.
+    p.life[i] = em.lifetime * (0.7f + 0.3f * f3);
 }
 
 // ===========================================================================
@@ -44,12 +64,12 @@ __device__ inline void spawn(ParticleSoA p, int i, float bound)
 // index i, we can fill the initial state directly in device memory -- no CPU
 // arrays, no host->device upload (that's why L3 has no host_ mirror anymore).
 // ===========================================================================
-__global__ void init_kernel(ParticleSoA p, int n, float bound)
+__global__ void init_kernel(ParticleSoA p, int n, int numEmitters)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n)
         return;
-    spawn(p, i, bound);
+    spawn(p, i, numEmitters); // forward the emitter count so spawn does i % numEmitters
 }
 
 // ===========================================================================
@@ -99,7 +119,7 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
     p.life[i] -= dt;       // age this particle
     if (p.life[i] <= 0.0f) // dead? recycle it in place (deterministic)
     {
-        spawn(p, i, params.bound);
+        spawn(p, i, params.numEmitters); // recycle a dead particle from its emitter (same rule as init)
     }
 
     // --- Write this particle's vertex straight into the VBO (must be AFTER the
@@ -146,8 +166,13 @@ ParticleSystem::ParticleSystem(const SimParams &p) // definition of the ctor dec
     CUDA_CHECK(cudaMalloc(&d_.cg, bytes));
     CUDA_CHECK(cudaMalloc(&d_.cb, bytes));
 
+    Emitter table[] = {
+        {-0.6f, -0.6f, 0.785f, 0.30f, 0.6f, 1.0f, 0.4f, 0.2f, 3.0f},
+        {-0.6f, -0.6f, 0.385f, 0.30f, 0.6f, 1.0f, 0.2f, 0.2f, 2.0f}};
+    int count = sizeof(table) / sizeof(table[0]);
+    upload_emitter(table, count);
     int block = 256, grid = (n_ + block - 1) / block;
-    init_kernel<<<grid, block>>>(d_, n_, params_.bound);
+    init_kernel<<<grid, block>>>(d_, n_, params_.numEmitters); // params_.numEmitters was set by upload_emitter() just above
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -171,6 +196,12 @@ void ParticleSystem::register_vbo(unsigned int vbo_id)
         vbo_id,                               // in:  the GL buffer id to share
         cudaGraphicsRegisterFlagsWriteDiscard // hint: full overwrite, no read-back
         ));
+}
+
+void ParticleSystem::upload_emitter(const Emitter *e, int count)
+{
+    CUDA_CHECK(cudaMemcpyToSymbol(d_emitters, e, count * sizeof(Emitter)));
+    params_.numEmitters = count;
 }
 
 // ===========================================================================
@@ -229,4 +260,3 @@ void ParticleSystem::update(float dt)
     //    buffer is safe for draw() the moment this returns. draw() must come AFTER.
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &vbo_resource_, 0));
 }
-
