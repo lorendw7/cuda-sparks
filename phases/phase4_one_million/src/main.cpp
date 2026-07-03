@@ -1,6 +1,6 @@
-// Phase 4 L2 -- window + GL context, then run the 1M-particle sim each frame.
-// With CUDA-GL interop the kernel writes vertices straight into the VBO, so the
-// old GPU->CPU->GPU round trip is gone; we now time just the sim update.
+// Phase 4 (L2-L4) -- window + GL context, then run the 1M-particle sim each frame.
+// CUDA-GL interop: the kernel writes vertices straight into the VBO (no CPU round
+// trip). SPARKS_MAX_FRAMES caps the loop so Nsight application-replay can profile it.
 // glad must be included before glfw.
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -8,6 +8,7 @@
 #include "renderer.h"        // our hand-written rendering layer
 #include "particle_system.h" // the 1M-particle GPU simulation
 #include <chrono>            // high_resolution_clock for the per-frame timing
+#include <cstdlib>           // getenv, atol
 
 int main()
 {
@@ -50,14 +51,14 @@ int main()
         // Simulation config. {} zero-inits every field first, so the knobs we
         // don't set (damping/nbodyStrength/swirl) are 0 rather than garbage.
         SimParams params{};
-        params.n = 1000000;       // one million particles
-        params.gravity = 0.5f;    // downward pull
+        params.n = 1000000;        // one million particles
+        params.gravity = 0.5f;     // downward pull
         params.restitution = 0.8f; // keep 80% of speed on each wall bounce
-        params.bound = 1.0f;      // world edge [-1,1], matches clip space
-        params.dt = 0.016f;       // placeholder, unused this level
+        params.bound = 1.0f;       // world edge [-1,1], matches clip space
+        params.dt = 0.016f;        // placeholder, unused this level
 
-        // Construct the system: this cudaMallocs the device array and uploads
-        // the initial state to the GPU.
+        // Construct the system: cudaMallocs the 8 SoA field arrays and fills the
+        // initial state on the GPU (init_kernel) -- no host upload.
         ParticleSystem sim(params);
 
         // Renderer's VBO must be sized to hold all 1M particles.
@@ -65,20 +66,25 @@ int main()
         renderer.init(sim.size());
         sim.register_vbo(renderer.vbo());
 
-        const float dt = 0.016f;    // fixed physics step for stability
+        const float dt = 0.016f; // fixed physics step for stability
 
-        double accUpdate = 0.0; // sim update ms, summed over the current second
-        int frames = 0;                                          // frames counted this second
+        double accUpdate = 0.0;                                      // sim update ms, summed over the current second
+        int frames = 0;                                              // frames counted this second
         auto lastReport = std::chrono::high_resolution_clock::now(); // last time we printed
+
+        // Profiling escape hatch: if SPARKS_MAX_FRAMES is set, quit after that many
+        // frames so Nsight application-replay can relaunch a process that terminates.
+        const char *maxEnv = std::getenv("SPARKS_MAX_FRAMES");
+        long maxFrames = maxEnv ? std::atol(maxEnv) : 0; // 0 = run forever (normal use)
+        long frameCount = 0;
 
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
         {
             // Two timestamps bracket the one segment left to measure: the sim.
             auto t0 = std::chrono::high_resolution_clock::now();
-            sim.update(dt);          // map VBO -> kernel writes physics + vertices -> unmap
+            sim.update(dt); // map VBO -> kernel writes physics + vertices -> unmap
             auto t1 = std::chrono::high_resolution_clock::now();
-          
 
             // Accumulate the update time in milliseconds (duration<double, milli>).
             accUpdate += std::chrono::duration<double, std::milli>(t1 - t0).count();
@@ -92,11 +98,14 @@ int main()
             glfwSwapBuffers(window); // present the frame
             glfwPollEvents();        // handle close/keyboard events
 
+            if (maxFrames > 0 && ++frameCount >= maxFrames)
+                glfwSetWindowShouldClose(window, 1); // hit the cap -> exit the loop cleanly
+
             // Once per second, print the average update time + the FPS, then reset.
             if (std::chrono::duration<double>(t1 - lastReport).count() >= 1.0)
             {
                 printf("update %.2f ms | %d FPS\n", // \n flushes one clean line/sec
-                accUpdate / frames, frames);
+                       accUpdate / frames, frames);
                 accUpdate = 0.0;
                 frames = 0;
                 lastReport = t1;

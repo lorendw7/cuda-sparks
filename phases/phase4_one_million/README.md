@@ -104,6 +104,29 @@ measure. Also cleaned up in this pass: deleted `host_`, `to_vertices()`.
 - Deliverable: a short "what I changed and how much each helped" summary at the bottom of
   this README.
 
+**Result — Nsight Compute on `update_kernel` (1M particles, block=256, RTX 5070 Ti Laptop):**
+
+Profiled with `ncu --replay-mode application` (kernel replay can't save/restore the
+CUDA-GL interop VBO). Added a `SPARKS_MAX_FRAMES` env-var escape hatch so the app
+terminates for application replay. Kernel duration ~164 µs.
+
+| Section | Metric | Value | Reading |
+| ------- | ------ | ----- | ------- |
+| Speed of Light | Memory Throughput | **93.9%** | memory-bound |
+| Speed of Light | Compute (SM) | **14.2%** | compute nearly idle |
+| Speed of Light | L2 Cache Throughput | 93.9% | **L2 is the actual limiter** (DRAM only 62.9%) |
+| Memory | Max Bandwidth | 93.9% (326 GB/s) | memory subsystem ~saturated |
+| Memory | L1 / L2 Hit Rate | 69% / 64% | caches absorb most traffic → L2-bound, not DRAM |
+| Occupancy | Achieved | **89.3%** (42.8/48 warps) | excellent; not the bottleneck |
+
+**Conclusion:** the kernel is memory-bandwidth-bound (L2) with compute idle and
+occupancy already near-max. This explains L3's null result: the wall is *total
+bytes moved*, and SoA only rearranges bytes — it doesn't move fewer when the kernel
+reads every field. Real speedups here would come from moving **less** data (fewer
+fields, smaller/half-precision storage), not from layout or block-size tuning.
+Block-size sweep (128/256/512) is expected to be marginal since we're bandwidth-
+bound, not occupancy-bound.
+
 ### L5 — Effects & presets, rebuilt from scratch
 
 Phase 3 handed you the effect system as working code. Here you **re-implement every
@@ -213,6 +236,10 @@ looking procedural and starts looking real.
       expected, since the kernel reads nearly every field so AoS had little waste
       for coalescing to reclaim. Deleted `host_` / `to_vertices()`. Nsight (L4)
       will measure whether coalescing efficiency improved regardless.
-- [ ] L4 Nsight profiling
+- [x] L4 Nsight profiling — `ncu` (application replay; added `SPARKS_MAX_FRAMES`
+      escape hatch) on `update_kernel`: Memory 93.9% vs Compute 14.2% → memory-bound,
+      specifically L2-limited (DRAM 62.9%); Achieved Occupancy 89.3% (not the
+      bottleneck). Confirms L3's null result — the wall is total bytes moved, so SoA
+      (same bytes, rearranged) can't help; only moving *less* data would.
 - [ ] L5 Effects & presets from scratch (emitters, staggered life, gravity/nbody/swirl, your own look)
 - [ ] L6 Realistic simulation & randomness (episodic shell bursts, per-style physics, full per-particle RNG)
