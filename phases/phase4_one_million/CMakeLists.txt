@@ -5,7 +5,7 @@
 add_executable(phase4
     src/main.cpp
     src/renderer.cpp
-    # src/particle_system.cu
+    src/particle_system.cu
 )
 
 target_link_libraries(phase4 PRIVATE glfw glad_gl_core)

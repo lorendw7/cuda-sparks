@@ -13,7 +13,7 @@ layout (location = 1) in vec3 aColor;  // attribute 1: color    (matches VertexA
 out vec3 vColor;                       // hand the color to the fragment shader
 void main() {
     gl_Position  = vec4(aPos, 0.0, 1.0); // already in [-1,1] clip space; z=0, w=1
-    gl_PointSize = 12.0;                 // point diameter in pixels (needs GL_PROGRAM_POINT_SIZE)
+    gl_PointSize = 2.0;                 // point diameter in pixels (needs GL_PROGRAM_POINT_SIZE)
     vColor       = aColor;               // pass color through unchanged
 }
 )";

@@ -43,6 +43,18 @@ straight into the OpenGL buffer so the CPU never touches particle data.
   the CPU pack.
 - Deliverable: a "slow but correct" 1M baseline to compare every later optimization against.
 
+**Baseline result (1,000,000 particles, scatter + gravity, RTX GPU, uncapped vsync):**
+
+| segment   | avg ms  | what's inside |
+| --------- | ------- | ------------- |
+| `update`  | ~7.3    | kernel compute **+ `cudaMemcpy` D2H** (36 MB/frame back to host) |
+| `pack`    | ~4.0    | CPU loop packs 1M particles into `[x,y,r,g,b]` (writes 20 MB) |
+| `upload`  | ~7.7    | 20 MB host→VBO (`glBufferSubData`, CPU→GPU) |
+| **total** | **~19** | **~52 FPS** |
+
+The physics itself costs well under 1 ms — nearly the whole frame is the GPU→CPU→GPU
+round trip (36 MB down + CPU repack + 20 MB up). This is the wall L2 tears out.
+
 ### L2 — CUDA–OpenGL interop: kill the round trip
 
 - Register the OpenGL VBO with CUDA via `cudaGraphicsGLRegisterBuffer`.
@@ -161,7 +173,11 @@ looking procedural and starts looking real.
       draw + destructor, non-copyable) drawing `GL_POINTS` from interleaved
       `[x,y,r,g,b]` vertices. `main.cpp` wires it up and draws 4 test points to
       verify the pipeline before the particle system exists.
-- [ ] L1 Scale to 1M & measure the bottleneck
+- [x] L1 Scale to 1M & measure the bottleneck — naive GPU→CPU→GPU baseline
+      (`particle_system.{h,cu}` + three-segment timing in `main.cpp`). Result:
+      update ~7.3 ms / pack ~4.0 ms / upload ~7.7 ms, ~52 FPS. Round trip
+      confirmed as the bottleneck; physics itself is <1 ms. Default look for now =
+      full-screen scatter + gravity (throwaway scaffolding, replaced by L2's rewrite).
 - [ ] L2 CUDA–OpenGL interop
 - [ ] L3 SoA layout
 - [ ] L4 Nsight profiling
