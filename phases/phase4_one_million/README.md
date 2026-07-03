@@ -87,6 +87,15 @@ physics itself. The remaining per-frame cost has moved off the sim entirely (int
   contiguous → **coalesced memory access**; AoS strides across memory and wastes bandwidth.
 - Use Nsight to compare L2 vs L3 memory throughput / frame rate and quantify the gain.
 
+**Result (1,000,000 particles, RTX 5070 Ti Laptop, uncapped):** wall-clock is
+**unchanged from L2** — ~0.08 ms steady-state `update`, ~1040 FPS. This is the
+expected outcome, not a failure: `update_kernel` reads almost every field
+(x,y,vx,vy,life,cr,cg,cb), so AoS wasn't wasting much of each 36-byte fetch —
+there was little coalescing headroom for SoA to reclaim. SoA pays off most when a
+kernel touches *few* fields; here it doesn't. Whether coalescing efficiency
+actually improved (even without a frame-time win) is what L4's Nsight pass will
+measure. Also cleaned up in this pass: deleted `host_`, `to_vertices()`.
+
 ### L4 — Nsight profiling deep-dive
 
 - Inspect occupancy, memory throughput, warp utilization.
@@ -198,7 +207,12 @@ looking procedural and starts looking real.
       Deleted the per-frame `cudaMemcpy` round trip. Result: `update` ~19 ms → ~0.9 ms
       (settling to ~0.07 ms), ~52 FPS → ~1000+ FPS. `host_`/`to_vertices`/`upload` left
       as dead code, deleted in L3's SoA rewrite.
-- [ ] L3 SoA layout
+- [x] L3 SoA layout — split AoS `Particle*` into 8 `float*` field arrays
+      (`ParticleSoA`); initial fill moved to an on-GPU `init_kernel` (no host
+      mirror, no upload). Wall-clock unchanged from L2 (~0.08 ms, ~1040 FPS) —
+      expected, since the kernel reads nearly every field so AoS had little waste
+      for coalescing to reclaim. Deleted `host_` / `to_vertices()`. Nsight (L4)
+      will measure whether coalescing efficiency improved regardless.
 - [ ] L4 Nsight profiling
 - [ ] L5 Effects & presets from scratch (emitters, staggered life, gravity/nbody/swirl, your own look)
 - [ ] L6 Realistic simulation & randomness (episodic shell bursts, per-style physics, full per-particle RNG)
