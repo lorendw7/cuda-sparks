@@ -5,9 +5,10 @@
 // ===========================================================================
 // ParticleSystem (Phase 3)  --  the GPU simulation with effect forces.
 // ===========================================================================
-// Same interface as Phase 2: the particles live in GPU memory and update()
-// runs a CUDA kernel. Phase 3 adds effect forces (e.g. a gravity well) inside
-// that kernel -- the class shape does not change.
+// Builds on Phase 2: the particles live in GPU memory and update() runs a CUDA
+// kernel. Phase 3 adds effect forces (mutual n-body attraction + swirl/vortex),
+// data-driven emitters, and preset switching -- so the class grew a set_preset()
+// method and a per-particle curandState RNG array (d_rng_) that Phase 2 lacked.
 //
 // This file is plain C++ (no CUDA syntax) so the host compiler can read it.
 // The actual CUDA code lives in particle_system.cu.

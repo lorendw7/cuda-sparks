@@ -75,9 +75,10 @@ round trip (36 MB down + CPU repack + 20 MB up). This is the wall L2 tears out.
 physics itself. The remaining per-frame cost has moved off the sim entirely (into
 `draw` / buffer swap), which is what L4's Nsight pass will dissect.
 
-> Cleanup still owed (does not affect correctness): `host_` is now only used by the
-> constructor for the initial fill, and `to_vertices()` / `Renderer::upload()` are
-> dead code. We keep them until L3 rewrites this layer for SoA, then delete in one pass.
+> Cleanup status: L3 deleted `host_` and `to_vertices()`. `Renderer::upload()` is
+> still present but is now **dead code** — the L2 interop path writes the VBO directly,
+> so nothing calls it. Kept as a reference for the pre-interop upload pattern; safe to
+> delete whenever.
 
 ### L3 — Structure of Arrays (SoA)
 
@@ -153,12 +154,32 @@ not just the plumbing. Build these in order, testing each before the next:
    forces and emitter layout that produce it. This is the "you can now build any style"
    checkpoint.
 
-**Progress:** Steps 1–2 DONE — the `Emitter` table lives in `__constant__ d_emitters`,
-uploaded once via `upload_emitter()` / `cudaMemcpyToSymbol` (added `SimParams.numEmitters`).
-`spawn()` now births particle `i` from emitter `i % numEmitters`: polar `(angle ± spread,
-baseSpeed)` → Cartesian velocity, emitter position/colour, and a staggered lifetime so the
-stream is continuous, not pulsed. Constructor uploads a 2-emitter test table before
-`init_kernel`. Remaining: 3 physics forces, 4 presets + number-key switching, 5 own look.
+**Progress:** Steps 1–4 DONE. The `Emitter` table lives in `__constant__ d_emitters`,
+uploaded via `upload_emitter()` / `cudaMemcpyToSymbol` (added `SimParams.numEmitters`).
+`spawn()` births particle `i` from emitter `i % numEmitters`: polar `(angle ± spread,
+baseSpeed)` → Cartesian velocity, emitter position/colour, staggered lifetime so the
+stream is continuous, not pulsed. `update_kernel` sums three named forces —
+`gravity` / central attractor (`nbodyStrength`) / `swirl` — into an `(ax, ay)`
+accumulator, then integrates with semi-implicit Euler. A `Preset` table (fireworks /
+fire / nebula) bundles an emitter table with those physics knobs; `set_preset(i)`
+clamps, re-uploads the emitters, and copies the knobs into `params_`. The constructor
+boots preset 0 and number keys **1 / 2 / 3** switch live (the look fades in over ~1
+lifetime as particles recycle). Remaining: **Step 5** — invent your own look.
+
+**Real randomness (pulled forward from L6):** the index-derived `frac(i * golden)`
+jitter formed visible *ripples* at low counts (a low-discrepancy sequence shows
+structure), so `spawn()` now draws from a **per-particle `curandState`**: a `d_rng_`
+array seeded once by an `init_rng` kernel (`curand_init(seed, i, 0, …)` — subsequence
+`i` decorrelates each stream), then `curand_uniform()` for angle/speed/lifetime. Every
+spawn *and* rebirth draws fresh values, so no repeating paths. (Cheap here — `curandState`
+is ~48 B/particle, only a bandwidth concern at 1M; at 10k–30k it's free.)
+
+**Look tuning:** presets ported to Phase 3's values (spread-out fast fireworks, narrow
+fire jets, two-source swirl nebula). Renderer matched to Phase 3 (`gl_PointSize 12`,
+alpha blend, soft round dot). **Key fix:** the sim used a *fixed* `dt = 0.016` while the
+frame rate was uncapped (thousands of FPS) → physics ran ~50× too fast (a chaotic churn
+that read as "blur"). Now `dt` is the **real elapsed frame time** (clamped to 0.05 s), so
+the sim is frame-rate-independent and runs at real-time speed.
 
 ### L6 — Realistic simulation & randomness
 
@@ -245,8 +266,9 @@ is pedagogical (learn `__half` / `__half2`) and closing L4's scientific loop.
       triangle with `glDrawArrays`. The base every later level builds on.
 - [x] Renderer refactored into a reusable `Renderer` class (RAII: init/upload/
       draw + destructor, non-copyable) drawing `GL_POINTS` from interleaved
-      `[x,y,r,g,b]` vertices. `main.cpp` wires it up and draws 4 test points to
-      verify the pipeline before the particle system exists.
+      `[x,y,r,g,b]` vertices. At that milestone `main.cpp` drew 4 test points to
+      verify the pipeline before the particle system existed (it now runs the full
+      1M draw loop).
 - [x] L1 Scale to 1M & measure the bottleneck — naive GPU→CPU→GPU baseline
       (`particle_system.{h,cu}` + three-segment timing in `main.cpp`). Result:
       update ~7.3 ms / pack ~4.0 ms / upload ~7.7 ms, ~52 FPS. Round trip
@@ -268,6 +290,11 @@ is pedagogical (learn `__half` / `__half2`) and closing L4's scientific loop.
       specifically L2-limited (DRAM 62.9%); Achieved Occupancy 89.3% (not the
       bottleneck). Confirms L3's null result — the wall is total bytes moved, so SoA
       (same bytes, rearranged) can't help; only moving *less* data would.
-- [~] L5 Effects & presets from scratch — **Steps 1–2 DONE** (emitters in `__constant__` + `cudaMemcpyToSymbol` upload; `spawn` births from emitter with polar→Cartesian launch; staggered life). Remaining: physics forces, presets + number keys, invent own look
+- [~] L5 Effects & presets from scratch — **Steps 1–4 DONE** (emitters in
+      `__constant__` + `cudaMemcpyToSymbol` upload; `spawn` births from emitter with
+      polar→Cartesian launch + staggered life; three named forces —
+      gravity / central attractor / swirl — in an `(ax,ay)` accumulator + semi-implicit
+      Euler; `Preset` table + `set_preset` + number-key **1/2/3** switching, ctor boots
+      preset 0). Remaining: **Step 5** invent your own look.
 - [ ] L6 Realistic simulation & randomness (episodic shell bursts, per-style physics, full per-particle RNG)
 - [ ] L7 Precision & bandwidth *(optional)* — FP16/`__half2` on tolerant fields, re-run L4 Nsight to confirm "fewer bytes ≈ less time"

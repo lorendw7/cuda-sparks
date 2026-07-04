@@ -60,6 +60,7 @@ generator, and builds everything:
 .\build.bat run1     REM build, then run Phase 1 (CPU)
 .\build.bat run2     REM build, then run Phase 2 (CUDA)
 .\build.bat run3     REM build, then run Phase 3 (Effects)
+.\build.bat run4     REM build, then run Phase 4 (One Million)
 .\build.bat clean    REM delete build/ and start fresh
 ```
 
@@ -98,13 +99,22 @@ cuda-sparks/
     │       ├── particle_system.h  ← host-side class interface (plain C++)
     │       ├── particle_system.cu ← YOUR work: the CUDA kernel + memory plumbing
     │       └── renderer.h/.cpp    ← OpenGL point renderer (same as Phase 1)
-    └── phase3_effects/
+    ├── phase3_effects/
+    │   ├── README.md          ← the lesson: read this first
+    │   ├── CMakeLists.txt
+    │   └── src/
+    │       ├── main.cpp           ← app loop (1280x1280 window)
+    │       ├── particle_system.h  ← host-side class interface
+    │       ├── particle_system.cu ← YOUR work: emitters + swirl + tiled N-body kernels
+    │       └── renderer.h/.cpp    ← OpenGL point renderer (fully commented reference)
+    └── phase4_one_million/
+        ├── README.md          ← the lesson: read this first
         ├── CMakeLists.txt
         └── src/
-            ├── main.cpp           ← app loop (1280x1280 window)
-            ├── particle_system.h  ← host-side class interface
-            ├── particle_system.cu ← YOUR work: gravity well + N-body force kernels
-            └── renderer.h/.cpp    ← OpenGL point renderer (fully commented reference)
+            ├── main.cpp           ← window + main loop + preset keys + timing
+            ├── renderer.h/.cpp    ← YOUR work: hand-written GL point renderer (RAII class)
+            ├── particle_system.h  ← host-side class interface (SoA + interop)
+            └── particle_system.cu ← YOUR work: 1M SoA sim, CUDA-GL interop, emitters/presets
 ```
 
 ---

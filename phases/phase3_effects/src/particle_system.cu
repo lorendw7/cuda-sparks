@@ -25,7 +25,7 @@ __constant__ int d_numEmitters;
 // physics into params_ and re-uploads its emitters into __constant__ memory;
 // recycled particles then adopt the new look, so switches cross-fade naturally.
 //   Emitter fields:  { x, y, angle, spread, baseSpeed, r, g, b, lifetime }
-//   Preset fields:   { { emitters... }, numEmitters, gravity, nbodyStrength }
+//   Preset fields:   { { emitters... }, numEmitters, gravity, nbodyStrength, swirl }
 //   0 = fireworks (scattered full-circle bursts, falls under gravity)
 //   1 = fire      (bottom sources aimed up, warm, negative gravity = buoyancy)
 //   2 = nebula    (slow wide cold drift, weak mutual gravity swirls it together)
@@ -209,9 +209,11 @@ __global__ void nbody_force_tiled(Particle *particles, int n, float strength,
 // ===========================================================================
 // update_kernel  --  advance one particle per thread.  (runs every frame)
 // ===========================================================================
-// Per-particle physics: gravity, integrate position, bounce off the 4 walls,
-// age, and recycle dead particles through the real RNG. Phase 3 effect forces
-// (e.g. the gravity well) are added inside this body.
+// Per-particle physics: gravity, the swirl/vortex force (below), integrate
+// position, bounce off the 4 walls, age, and recycle dead particles through the
+// real RNG. The mutual-attraction (n-body) force is NOT here -- it runs in its
+// own kernel (nbody_force_tiled) before this one, since it needs every particle's
+// position read before any position is written.
 //
 // Note: use params.gravity (a dot), NOT params_.gravity -- params is the COPY
 // passed in as an argument, not the class member.

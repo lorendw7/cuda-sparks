@@ -5,6 +5,7 @@ REM    build.bat            - configure (first time) + build everything
 REM    build.bat run1       - build, then run Phase 1 (CPU)
 REM    build.bat run2       - build, then run Phase 2 (CUDA)
 REM    build.bat run3       - build, then run Phase 3 (Effects)
+REM    build.bat run4       - build, then run Phase 4 (One Million)
 REM    build.bat clean      - delete the build/ folder and start fresh
 REM
 REM  We use the Ninja generator (bundled with Visual Studio) instead of the

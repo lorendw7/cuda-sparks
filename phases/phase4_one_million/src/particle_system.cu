@@ -6,8 +6,92 @@
 
 #include <glad/gl.h>
 #include <cuda_gl_interop.h>
+#include <curand_kernel.h>
 
 __constant__ Emitter d_emitters[MAX_EMITTERS];
+
+// ===========================================================================
+// presets  --  the effect library (L5-4).  One Preset bundles an emitter table
+// with the three physics knobs (gravity / nbodyStrength / swirl) that shape it.
+// ===========================================================================
+// Field order matches the struct: { emitters[MAX_EMITTERS], numEmitters, gravity,
+// nbodyStrength, swirl }. Only the first numEmitters rows are used; the rest are
+// zero-filled by the aggregate initializer and never uploaded. Add/remove a whole
+// Preset here and numPresets (below) + the number keys in main.cpp pick it up.
+//   0 fireworks -- scattered full-circle bursts, positive gravity (fall)
+//   1 fire      -- bottom row aimed up, negative gravity (buoyant rise), warm
+//   2 nebula    -- two offset cold omni sources + strong swirl (rotating cloud)
+// ===========================================================================
+static const Preset presets[] = {
+    // ---- 0: fireworks -- 3 full-circle bursts, fast launch, slight swirl, fall under gravity ----
+    {
+        {
+            //  x     y   angle  spread  baseSpd  r    g    b    life
+            {-0.5f, 0.3f, 0.0f, 6.2832f, 1.2f, 1.0f, 0.2f, 0.2f, 4.0f}, // red,  upper-left
+            { 0.5f, 0.4f, 0.0f, 6.2832f, 1.2f, 0.2f, 0.6f, 1.0f, 4.0f}, // blue, upper-right
+            { 0.0f,-0.2f, 0.0f, 6.2832f, 1.2f, 1.0f, 0.9f, 0.3f, 4.0f}, // gold, center
+        },
+        3,        // numEmitters
+        0.45f,    // gravity
+        0.000012f,// nbodyStrength
+        0.4f,     // swirl
+    },
+    // ---- 1: fire -- 3 narrow upward jets along the bottom, buoyant (negative gravity), warm ----
+    {
+        {
+            {-0.15f,-0.9f, 1.5708f, 0.28f, 0.9f, 1.0f, 0.3f, 0.05f, 3.0f}, // deep red
+            { 0.0f, -0.9f, 1.5708f, 0.28f, 1.0f, 1.0f, 0.6f, 0.1f,  3.0f}, // orange
+            { 0.15f,-0.9f, 1.5708f, 0.28f, 0.9f, 1.0f, 0.85f,0.2f,  3.0f}, // yellow
+        },
+        3,
+        -0.5f,
+        0.000006f,
+        0.0f,
+    },
+    // ---- 2: nebula -- two slow cold omni sources + strong swirl (a rotating cloud) ----
+    {
+        {
+            {-0.3f, 0.0f, 0.0f, 6.2832f, 0.15f, 0.3f, 0.4f, 1.0f, 9.0f}, // blue cloud
+            { 0.3f, 0.0f, 0.0f, 6.2832f, 0.15f, 0.7f, 0.3f, 1.0f, 9.0f}, // purple cloud
+        },
+        2,
+        0.0f,
+        0.000015f,
+        1.2f,
+    }};
+
+
+static const int numPresets = sizeof(presets) / sizeof(presets[0]);
+
+// ===========================================================================
+// set_preset  --  switch the whole look to preset i.  (ctor boot + number keys)
+// ===========================================================================
+// Clamp i into range, then (1) re-upload that preset's emitter table into
+// __constant__ memory via upload_emitter (which also sets params_.numEmitters),
+// and (2) copy its three physics knobs into params_ so the next update_kernel
+// launch uses them. Cheap: no realloc, no init_kernel -- the 1M particles already
+// alive keep flying and only adopt the new look as they recycle, so a switch
+// fades in over roughly one lifetime (a feature, not a bug).
+// ===========================================================================
+void ParticleSystem::set_preset(int i)
+{
+    if (i < 0)
+    {
+        i = 0;
+    }
+
+    if (i >= numPresets)
+    {
+        i = numPresets - 1;
+    }
+
+    const Preset& pr = presets[i];
+    upload_emitter(pr.emitters, pr.numEmitters);
+
+    params_.gravity = pr.gravity;
+    params_.nbodyStrength = pr.nbodyStrength;
+    params_.swirl = pr.swirl;
+}
 
 // ===========================================================================
 // spawn  --  write particle i's initial/reborn state into the SoA arrays.
@@ -16,18 +100,17 @@ __constant__ Emitter d_emitters[MAX_EMITTERS];
 // (recycle a dead particle) -- run on the GPU, so there is no host path left.
 // (L5) A particle is now BORN FROM AN EMITTER: particle i is assigned emitter
 // (i % numEmitters), whose recipe is read from the __constant__ d_emitters table,
-// and takes that emitter's position / aim / colour / lifetime. The jitter (spread,
-// speed, life) is still faked from the index i -- real per-particle curand is L6.
+// and takes that emitter's position / aim / colour / lifetime. The jitter (angle
+// within spread, speed, lifetime) now comes from this particle's own curandState
+// (curand_uniform) -- so each spawn, and each later rebirth, draws fresh randoms.
 // ===========================================================================
-__device__ inline void spawn(ParticleSoA p, int i, int numEmitters)
+__device__ inline void spawn(ParticleSoA p, int i, int numEmitters, curandState *st)
 {
-    // Three pseudo-random values in [0,1): index * irrational, keep the fraction.
-    float f1 = i * 0.6180340f; // golden ratio
-    f1 -= floorf(f1);          // fractional part -> [0,1)
-    float f2 = i * 0.7548777f;
-    f2 -= floorf(f2);
-    float f3 = i * 0.9541230f;
-    f3 -= floorf(f3);
+    // Three fresh randoms in (0,1]. curand_uniform advances *st, so each rebirth
+    // of this particle draws NEW values -> no repeating path, no ripple structure.
+    float f1 = curand_uniform(st);
+    float f2 = curand_uniform(st);
+    float f3 = curand_uniform(st);
 
     // Pick this particle's emitter and copy its recipe out of constant memory.
     int e = i % numEmitters;    // round-robin: assign particle i to one emitter
@@ -58,39 +141,89 @@ __device__ inline void spawn(ParticleSoA p, int i, int numEmitters)
 }
 
 // ===========================================================================
+// init_rng  --  seed one curandState per particle.  (runs ONCE, before init_kernel)
+// ===========================================================================
+// Same seed, but subsequence = i, so every particle gets its own decorrelated
+// random stream. Must run BEFORE init_kernel, since spawn() now draws from it.
+// ===========================================================================
+__global__ void init_rng(curandState *rng, int n, unsigned long long seed)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n)
+    {
+        return;
+    }
+    curand_init(seed, i, 0, &rng[i]);
+}
+
+// ===========================================================================
 // init_kernel  --  build the whole initial population on the GPU.  (runs ONCE)
 // ===========================================================================
-// One thread per particle calls spawn(). Because spawn is a pure function of the
-// index i, we can fill the initial state directly in device memory -- no CPU
-// arrays, no host->device upload (that's why L3 has no host_ mirror anymore).
+// One thread per particle calls spawn(), drawing from its own curandState (so
+// init_rng MUST have run first). The whole initial population is built directly in
+// device memory -- no CPU arrays, no host->device upload (that's why L3 has no host_ mirror).
 // ===========================================================================
-__global__ void init_kernel(ParticleSoA p, int n, int numEmitters)
+__global__ void init_kernel(ParticleSoA p, int n, int numEmitters, curandState *rng)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n)
         return;
-    spawn(p, i, numEmitters); // forward the emitter count so spawn does i % numEmitters
+    spawn(p, i, numEmitters, &rng[i]); // forward the emitter count so spawn does i % numEmitters
 }
 
 // ===========================================================================
 // update_kernel  --  advance one particle AND write its vertex.  (every frame)
 // ===========================================================================
-// One GPU thread per particle: apply gravity, integrate position, bounce off
-// the 4 walls, age, recycle the dead -- then (L2 interop) pack the result as
+// One GPU thread per particle: sum three forces (gravity + central attractor +
+// swirl) into an acceleration, integrate position, bounce off the 4 walls, age,
+// recycle the dead -- then (L2 interop) pack the result as
 // [x,y,r,g,b] straight into the OpenGL VBO via the mapped pointer `vbo`. No copy
 // to the CPU: physics and vertex output both land in device memory this frame.
 // params is passed BY VALUE (a copy per thread) -- use params.gravity (dot),
 // never params_ (that member is invisible here).
 // ===========================================================================
-__global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params, float dt)
+__global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params, float dt, curandState *rng)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x; // global thread id = particle index
     if (i >= n)                                    // grid usually rounds up past n:
         return;                                    // extra threads must do nothing
 
-    p.vy[i] -= params.gravity * dt; // gravity changes vertical velocity
+    // --- Force accumulator (L5-3) ---------------------------------------------
+    // Newton: a force produces an ACCELERATION. We sum every force's acceleration
+    // into (ax, ay) first, then apply it once. No dt here -- dt is one "per second"
+    // scale factor applied at the very end (a is "velocity change per second").
+    float ax = 0.0f, ay = 0.0f;
+    float px = p.x[i], py = p.y[i]; // read position once, reuse below
 
-    p.x[i] += p.vx[i] * dt; // integrate position from velocity
+    // 1) Gravity: a constant downward acceleration.
+    ay -= params.gravity;
+
+    // 2) Central attractor -- the O(n) stand-in for O(n^2) mutual N-body at 1M
+    //    scale. Pull every particle toward the origin (0,0):
+    //      px*px + py*py = r^2  (squared distance to origin, Pythagoras)
+    //      rsqrtf(r^2)   = 1/r  (fast reciprocal-sqrt hardware instruction)
+    //      (px,py)*invr  = the UNIT vector origin->particle (length 1, direction only)
+    //    Negate it to point particle->origin, scale by nbodyStrength. Because the
+    //    vector is normalized, the inward pull is the same strength at any distance.
+    //    +0.01f is "softening": stops 1/r blowing up when a particle sits at r=0.
+    float invr = rsqrtf(px * px + py * py + 0.01f);
+    ax -= px * invr * params.nbodyStrength;
+    ay -= py * invr * params.nbodyStrength;
+
+    // 3) Swirl: a tangential (vortex) force around the origin. Rotating the radius
+    //    vector (px,py) by +90 degrees gives the tangent (-py, px); pushing along it
+    //    makes particles ORBIT the center. No divide by r, so outer particles move
+    //    faster (rigid rotation) and the cloud winds into spiral arms -- the shape
+    //    mutual gravity alone can never make (that only collapses to a point).
+    ax -= py * params.swirl;
+    ay += px * params.swirl;
+
+    // --- Integrate (semi-implicit Euler) --------------------------------------
+    // Velocity first, THEN use the NEW velocity to move the position. This
+    // ordering (not position-first) keeps orbits stable, which swirl needs.
+    p.vx[i] += ax * dt; // v += a*dt   (acceleration changes velocity)
+    p.vy[i] += ay * dt;
+    p.x[i] += p.vx[i] * dt; // x += v*dt   (velocity changes position)
     p.y[i] += p.vy[i] * dt;
 
     // Bounce off each of the 4 walls: clamp to the wall, flip velocity, scale by
@@ -119,7 +252,7 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
     p.life[i] -= dt;       // age this particle
     if (p.life[i] <= 0.0f) // dead? recycle it in place (deterministic)
     {
-        spawn(p, i, params.numEmitters); // recycle a dead particle from its emitter (same rule as init)
+        spawn(p, i, params.numEmitters, &rng[i]); // recycle a dead particle from its emitter (same rule as init)
     }
 
     // --- Write this particle's vertex straight into the VBO (must be AFTER the
@@ -139,7 +272,7 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
     float *v = &vbo[i * 5]; // this particle's 5 floats inside the VBO
     v[0] = p.x[i];          // attribute 0 (pos.x) -- shader reads offset 0
     v[1] = p.y[i];          // attribute 0 (pos.y)
-    v[2] = p.cr[i] * fade;  // attribute 1 (color.r) -- shoffset 8
+    v[2] = p.cr[i] * fade;  // attribute 1 (color.r) -- shader reads offset 8
     v[3] = p.cg[i] * fade;  // attribute 1 (color.g)
     v[4] = p.cb[i] * fade;  // attribute 1 (color.b)
 }
@@ -165,14 +298,16 @@ ParticleSystem::ParticleSystem(const SimParams &p) // definition of the ctor dec
     CUDA_CHECK(cudaMalloc(&d_.cr, bytes));
     CUDA_CHECK(cudaMalloc(&d_.cg, bytes));
     CUDA_CHECK(cudaMalloc(&d_.cb, bytes));
+    CUDA_CHECK(cudaMalloc(&d_rng_, (size_t)n_ * sizeof(curandState)));
 
-    Emitter table[] = {
-        {-0.6f, -0.6f, 0.785f, 0.30f, 0.6f, 1.0f, 0.4f, 0.2f, 3.0f},
-        {-0.6f, -0.6f, 0.385f, 0.30f, 0.6f, 1.0f, 0.2f, 0.2f, 2.0f}};
-    int count = sizeof(table) / sizeof(table[0]);
-    upload_emitter(table, count);
+    // Boot the default look (preset 0). set_preset uploads its emitter table into
+    // __constant__ memory and sets params_.numEmitters -- so it MUST run before
+    // init_kernel below, which reads both to build the initial 1M population.
+    set_preset(0);
     int block = 256, grid = (n_ + block - 1) / block;
-    init_kernel<<<grid, block>>>(d_, n_, params_.numEmitters); // params_.numEmitters was set by upload_emitter() just above
+    init_rng<<<grid, block>>>((curandState *)d_rng_, n_, 1025ULL);
+    CUDA_CHECK(cudaGetLastError());
+    init_kernel<<<grid, block>>>(d_, n_, params_.numEmitters, (curandState *)d_rng_); // params_.numEmitters was set by set_preset(0) -> upload_emitter above
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -198,6 +333,13 @@ void ParticleSystem::register_vbo(unsigned int vbo_id)
         ));
 }
 
+// ===========================================================================
+// upload_emitter  --  push an emitter table into __constant__ memory. (ctor + set_preset)
+// ===========================================================================
+// cudaMemcpyToSymbol copies host bytes into the file-scope __constant__ d_emitters
+// BY SYMBOL NAME (not a pointer, unlike cudaMemcpy). Also records how many emitters
+// are live in params_.numEmitters, which spawn()/init_kernel read to do i % numEmitters.
+// ===========================================================================
 void ParticleSystem::upload_emitter(const Emitter *e, int count)
 {
     CUDA_CHECK(cudaMemcpyToSymbol(d_emitters, e, count * sizeof(Emitter)));
@@ -228,6 +370,7 @@ ParticleSystem::~ParticleSystem()
     cudaFree(d_.cr);
     cudaFree(d_.cg);
     cudaFree(d_.cb);
+    cudaFree(d_rng_);
 }
 
 // ===========================================================================
@@ -253,7 +396,7 @@ void ParticleSystem::update(float dt)
     // 3) Launch: physics into the SoA arrays (d_), vertices into d_vbo, one kernel.
     int block = 256;
     int grid = (n_ + block - 1) / block;
-    update_kernel<<<grid, block>>>(d_, d_vbo, n_, params_, dt);
+    update_kernel<<<grid, block>>>(d_, d_vbo, n_, params_, dt, (curandState *)d_rng_);
     CUDA_CHECK(cudaGetLastError());
 
     // 4) Return the VBO: CUDA -> GL. Waits for the kernel to finish, so the

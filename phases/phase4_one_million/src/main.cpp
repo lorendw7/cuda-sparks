@@ -1,6 +1,7 @@
-// Phase 4 (L2-L4) -- window + GL context, then run the 1M-particle sim each frame.
+// Phase 4 (L2-L5) -- window + GL context, then run the 1M-particle sim each frame.
 // CUDA-GL interop: the kernel writes vertices straight into the VBO (no CPU round
-// trip). SPARKS_MAX_FRAMES caps the loop so Nsight application-replay can profile it.
+// trip). Number keys 1/2/3 switch effect presets (fireworks / fire / nebula).
+// SPARKS_MAX_FRAMES caps the loop so Nsight application-replay can profile it.
 // glad must be included before glfw.
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -48,25 +49,40 @@ int main()
     // while the GL context is STILL alive. This "}" ends before glfwTerminate(),
     // so the destructor fires at the right time. (RAII + GL ordering.)
     {
-        // Simulation config. {} zero-inits every field first, so the knobs we
-        // don't set (damping/nbodyStrength/swirl) are 0 rather than garbage.
+        // Simulation config. {} zero-inits every field first. NOTE: gravity /
+        // nbodyStrength / swirl set here are OVERWRITTEN by set_preset(0) in the
+        // ctor -- presets own those three effect knobs now. Only n / restitution /
+        // bound below feed the running sim; params.dt is unused (update() runs on
+        // the local dt in the render loop, not params.dt).
         SimParams params{};
-        params.n = 1000000;        // one million particles
-        params.gravity = 0.5f;     // downward pull
-        params.restitution = 0.8f; // keep 80% of speed on each wall bounce
-        params.bound = 1.0f;       // world edge [-1,1], matches clip space
-        params.dt = 0.016f;        // placeholder, unused this level
+        // Particle count knob: env var SPARKS_PARTICLES overrides the default so you
+        // can A/B different counts without recompiling. Default 30k -- sparse enough that
+        // the alpha-blended dots stay separate and crisp. 1M is the perf-lesson stress
+        // figure, set via the env var.
+        const char *nEnv = std::getenv("SPARKS_PARTICLES");
+        params.n = nEnv ? std::atol(nEnv) : 30000;
+        if (params.n < 1)
+        {
+            params.n = 1;
+        }
+
+        params.gravity = 0.0f;       // (overridden by preset)
+        params.nbodyStrength = 0.0f; // (overridden by preset)
+        params.swirl = 1.0f;         // (overridden by preset)
+        params.restitution = 0.8f;   // keep 80% of speed on each wall bounce
+        params.bound = 1.0f;         // world edge [-1,1], matches clip space
+        params.dt = 0.016f;          // placeholder, unused this level
 
         // Construct the system: cudaMallocs the 8 SoA field arrays and fills the
         // initial state on the GPU (init_kernel) -- no host upload.
         ParticleSystem sim(params);
 
-        // Renderer's VBO must be sized to hold all 1M particles.
+        // Renderer's VBO must be sized to hold every particle (sim.size() = params.n).
         Renderer renderer;
         renderer.init(sim.size());
         sim.register_vbo(renderer.vbo());
 
-        const float dt = 0.016f; // fixed physics step for stability
+        auto lastTime = std::chrono::high_resolution_clock::now(); // previous-frame timestamp, for real dt
 
         double accUpdate = 0.0;                                      // sim update ms, summed over the current second
         int frames = 0;                                              // frames counted this second
@@ -81,8 +97,18 @@ int main()
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
         {
-            // Two timestamps bracket the one segment left to measure: the sim.
+            // Real frame-time step: dt = seconds since the previous frame, so the sim
+            // advances by wall-clock time and runs at the SAME speed at any FPS. (A
+            // fixed dt at uncapped FPS ran the physics ~50x too fast -> chaotic churn.)
+            // t0 also opens the sim-timing bracket that t1 (below) closes.
             auto t0 = std::chrono::high_resolution_clock::now();
+            float dt = std::chrono::duration<float>(t0 - lastTime).count(); // seconds since last frame
+            lastTime = t0;                                                  // remember for next frame
+            if (dt > 0.05f) // clamp a hitch (window drag / breakpoint) so particles don't teleport
+            {
+                dt = 0.05f;
+            }
+
             sim.update(dt); // map VBO -> kernel writes physics + vertices -> unmap
             auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -93,10 +119,29 @@ int main()
             glClearColor(0.02f, 0.02f, 0.05f, 1.0f); // dark blue background
             glClear(GL_COLOR_BUFFER_BIT);            // clear the back buffer
 
-            renderer.draw(); // draw all 1M particles as points
+            renderer.draw(); // draw every particle as a point (count = sim.size())
 
             glfwSwapBuffers(window); // present the frame
             glfwPollEvents();        // handle close/keyboard events
+
+            // Number keys switch the effect preset live. glfwGetKey reads the
+            // current key state (already refreshed by glfwPollEvents above); a press
+            // re-uploads that preset's emitters + physics. Existing particles adopt
+            // the new look only as they recycle, so it fades in over ~1 lifetime.
+            if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS)
+            {
+                sim.set_preset(0); // fireworks
+            }
+
+            if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS)
+            {
+                sim.set_preset(1); // fire
+            }
+
+            if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS)
+            {
+                sim.set_preset(2); // nebula
+            }
 
             if (maxFrames > 0 && ++frameCount >= maxFrames)
                 glfwSetWindowShouldClose(window, 1); // hit the cap -> exit the loop cleanly

@@ -13,13 +13,14 @@ layout (location = 1) in vec3 aColor;  // attribute 1: color    (matches VertexA
 out vec3 vColor;                       // hand the color to the fragment shader
 void main() {
     gl_Position  = vec4(aPos, 0.0, 1.0); // already in [-1,1] clip space; z=0, w=1
-    gl_PointSize = 2.0;                 // point diameter in pixels (needs GL_PROGRAM_POINT_SIZE)
+    gl_PointSize = 12.0;                 // point diameter in pixels (needs GL_PROGRAM_POINT_SIZE)
     vColor       = aColor;               // pass color through unchanged
 }
 )";
 
 // ---------------------------------------------------------------------------
 // Fragment shader: runs ONCE PER PIXEL of the point. Carves a soft round dot.
+// (Byte-identical to Phase 3's fragment shader.)
 // ---------------------------------------------------------------------------
 static const char *kFragmentShader = R"(
 #version 330 core
@@ -30,7 +31,7 @@ void main() {
     float dist = length(d);                 // how far this pixel is from the center
     if (dist > 0.5) discard;                // outside the circle: draw nothing (round dot)
     float glow = 1.0 - dist * 2.0;          // 1.0 at center, 0.0 at the edge
-    FragColor  = vec4(vColor * glow, glow); // fade both color and alpha toward the edge
+    FragColor  = vec4(vColor * glow, glow); // fade color AND alpha toward the edge (Phase 3)
 }
 )";
 
@@ -83,10 +84,12 @@ bool Renderer::init(int max_particles)
     glEnableVertexAttribArray(1);                                       // turn attribute 1 on
 
     // (e) unbind the VAO, then enable point-size + alpha blending
-    glBindVertexArray(0);                              // done configuring; unbind to avoid accidental edits
-    glEnable(GL_PROGRAM_POINT_SIZE);                   // let the shader's gl_PointSize take effect
-    glEnable(GL_BLEND);                                // enable alpha blending (soft glowing edges)
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); // new*alpha + old*(1-alpha): standard transparency
+    glBindVertexArray(0);            // done configuring; unbind to avoid accidental edits
+    glEnable(GL_PROGRAM_POINT_SIZE); // let the shader's gl_PointSize take effect
+    glEnable(GL_BLEND);              // turn blending on so overlapping points combine
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); // ALPHA blend: overlaps average instead of
+                                       // summing -> clean, saturated dots that don't blow out to
+                                       // white. This is Phase 3's look.
     count_ = max_particles;
     return true;
 }
