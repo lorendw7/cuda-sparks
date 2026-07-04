@@ -20,7 +20,9 @@ __constant__ Emitter d_emitters[MAX_EMITTERS];
 // Preset here and numPresets (below) + the number keys in main.cpp pick it up.
 //   0 fireworks -- scattered full-circle bursts, positive gravity (fall)
 //   1 fire      -- bottom row aimed up, negative gravity (buoyant rise), warm
-//   2 nebula    -- two offset cold omni sources + strong swirl (rotating cloud)
+//   2 galaxy    -- warm orange core + two cool arms; swirl winds them into a spinning disk
+//   3 Jia       -- two diagonal jets (pink + gold), gentle swirl curves them into
+//                  winding arms, no gravity
 // ===========================================================================
 static const Preset presets[] = {
     // ---- 0: fireworks -- 3 full-circle bursts, fast launch, slight swirl, fall under gravity ----
@@ -28,38 +30,59 @@ static const Preset presets[] = {
         {
             //  x     y   angle  spread  baseSpd  r    g    b    life
             {-0.5f, 0.3f, 0.0f, 6.2832f, 1.2f, 1.0f, 0.2f, 0.2f, 4.0f}, // red,  upper-left
-            { 0.5f, 0.4f, 0.0f, 6.2832f, 1.2f, 0.2f, 0.6f, 1.0f, 4.0f}, // blue, upper-right
-            { 0.0f,-0.2f, 0.0f, 6.2832f, 1.2f, 1.0f, 0.9f, 0.3f, 4.0f}, // gold, center
+            {0.5f, 0.4f, 0.0f, 6.2832f, 1.2f, 0.2f, 0.6f, 1.0f, 4.0f},  // blue, upper-right
+            {0.0f, -0.2f, 0.0f, 6.2832f, 1.2f, 1.0f, 0.9f, 0.3f, 4.0f}, // gold, center
         },
-        3,        // numEmitters
-        0.45f,    // gravity
-        0.000012f,// nbodyStrength
-        0.4f,     // swirl
+        3,         // numEmitters
+        0.45f,     // gravity
+        0.000012f, // nbodyStrength
+        0.4f,      // swirl
     },
     // ---- 1: fire -- 3 narrow upward jets along the bottom, buoyant (negative gravity), warm ----
     {
         {
-            {-0.15f,-0.9f, 1.5708f, 0.28f, 0.9f, 1.0f, 0.3f, 0.05f, 3.0f}, // deep red
-            { 0.0f, -0.9f, 1.5708f, 0.28f, 1.0f, 1.0f, 0.6f, 0.1f,  3.0f}, // orange
-            { 0.15f,-0.9f, 1.5708f, 0.28f, 0.9f, 1.0f, 0.85f,0.2f,  3.0f}, // yellow
+            {-0.15f, -0.9f, 1.5708f, 0.28f, 0.9f, 1.0f, 0.3f, 0.05f, 3.0f}, // deep red
+            {0.0f, -0.9f, 1.5708f, 0.28f, 1.0f, 1.0f, 0.6f, 0.1f, 3.0f},    // orange
+            {0.15f, -0.9f, 1.5708f, 0.28f, 0.9f, 1.0f, 0.85f, 0.2f, 3.0f},  // yellow
         },
         3,
         -0.5f,
         0.000006f,
         0.0f,
     },
-    // ---- 2: nebula -- two slow cold omni sources + strong swirl (a rotating cloud) ----
+    // ---- 2: galaxy -- warm orange core + two cool arms, wound by swirl into a spinning disk ----
+    // The orange source sits AT the origin (0,0): swirl/nbody are both centered there, so a
+    // particle at r=0 feels no sideways push and stays put -> a tight bright nucleus. The two
+    // blue sources are offset (x = +/-0.5), so swirl winds them into two spiral arms. gravity 0 keeps
+    // the disk round. (Was "nebula" -- an orange core + a warm color turned the cloud into a galaxy.)
     {
         {
-            {-0.3f, 0.0f, 0.0f, 6.2832f, 0.15f, 0.3f, 0.4f, 1.0f, 9.0f}, // blue cloud
-            { 0.3f, 0.0f, 0.0f, 6.2832f, 0.15f, 0.7f, 0.3f, 1.0f, 9.0f}, // purple cloud
+            //  x     y   angle  spread  baseSpd  r    g    b     life
+            {-0.5f, 0.0f, 0.0f, 6.2832f, 0.25f, 0.3f, 0.4f, 1.0f,  9.0f}, // cool arm #1 (blue)
+            { 0.0f, 0.0f, 0.0f, 6.2832f, 0.06f, 1.0f, 0.6f, 0.15f, 3.5f}, // warm orange core
+            { 0.5f, 0.0f, 0.0f, 6.2832f, 0.25f, 0.5f, 0.6f, 1.0f, 9.0f},  // cool arm #2 (lighter blue)
         },
-        2,
-        0.0f,
-        0.000015f,
-        1.2f,
+        3,        // numEmitters
+        0.0f,     // gravity        -- 0: keep the disk round, not squashed downward
+        0.00003f, // nbodyStrength  -- inward pull that tightens the disk (balance this vs swirl)
+        1.2f,     // swirl          -- orbital spin; winds the two offset arms into spirals
+    },
+    // ---- 3: Jia -- two diagonal jets (pink + gold) bent into arms by a gentle swirl ----
+    // Each source fires a directional fan (spread = 1.8 rad, ~103 deg) aimed diagonally,
+    // so here the angle field DOES steer the stream (unlike the full-circle presets above).
+    // Placed on opposite corners (upper-left / lower-right); the +swirl vortex curves the
+    // two jets so the pink and gold streams wind around the center instead of flying off.
+    {
+        {
+            //  x     y     angle    spread  baseSpd  r    g     b     life
+            {-0.6f, 0.8f, -0.785f, 1.8f, 0.2f, 1.0f, 0.71f, 0.76f, 8.0f}, // light pink, upper-left
+            {0.6f, -0.8f, 2.356f, 1.8f, 0.2f, 1.0f, 0.84f, 0.0f, 8.0f},   // gold, lower-right
+        },
+        2,        // numEmitters
+        0.0f,     // gravity        -- 0: keep the spiral round, not squashed downward
+        0.00002f, // nbodyStrength  -- a light inward leash so the arms don't fly to the walls
+        0.62f,     // swirl          -- gentle counter-clockwise vortex braids the two colors
     }};
-
 
 static const int numPresets = sizeof(presets) / sizeof(presets[0]);
 
@@ -85,7 +108,7 @@ void ParticleSystem::set_preset(int i)
         i = numPresets - 1;
     }
 
-    const Preset& pr = presets[i];
+    const Preset &pr = presets[i];
     upload_emitter(pr.emitters, pr.numEmitters);
 
     params_.gravity = pr.gravity;

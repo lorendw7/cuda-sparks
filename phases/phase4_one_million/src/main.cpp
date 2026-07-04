@@ -1,6 +1,6 @@
 // Phase 4 (L2-L5) -- window + GL context, then run the 1M-particle sim each frame.
 // CUDA-GL interop: the kernel writes vertices straight into the VBO (no CPU round
-// trip). Number keys 1/2/3 switch effect presets (fireworks / fire / nebula).
+// trip). Number keys 1/2/3 switch effect presets (fireworks / fire / galaxy).
 // SPARKS_MAX_FRAMES caps the loop so Nsight application-replay can profile it.
 // glad must be included before glfw.
 #include <glad/gl.h>
@@ -56,11 +56,11 @@ int main()
         // the local dt in the render loop, not params.dt).
         SimParams params{};
         // Particle count knob: env var SPARKS_PARTICLES overrides the default so you
-        // can A/B different counts without recompiling. Default 30k -- sparse enough that
-        // the alpha-blended dots stay separate and crisp. 1M is the perf-lesson stress
+        // can A/B different counts without recompiling. Default 60k -- dense enough to
+        // fill the galaxy disk and arms, still cheap. 1M is the perf-lesson stress
         // figure, set via the env var.
         const char *nEnv = std::getenv("SPARKS_PARTICLES");
-        params.n = nEnv ? std::atol(nEnv) : 30000;
+        params.n = nEnv ? std::atol(nEnv) : 60000;
         if (params.n < 1)
         {
             params.n = 1;
@@ -104,7 +104,7 @@ int main()
             auto t0 = std::chrono::high_resolution_clock::now();
             float dt = std::chrono::duration<float>(t0 - lastTime).count(); // seconds since last frame
             lastTime = t0;                                                  // remember for next frame
-            if (dt > 0.05f) // clamp a hitch (window drag / breakpoint) so particles don't teleport
+            if (dt > 0.05f)                                                 // clamp a hitch (window drag / breakpoint) so particles don't teleport
             {
                 dt = 0.05f;
             }
@@ -140,7 +140,12 @@ int main()
 
             if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS)
             {
-                sim.set_preset(2); // nebula
+                sim.set_preset(2); // galaxy
+            }
+
+            if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS)
+            {
+                sim.set_preset(3); // Jia
             }
 
             if (maxFrames > 0 && ++frameCount >= maxFrames)

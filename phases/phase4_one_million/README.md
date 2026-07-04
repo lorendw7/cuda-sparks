@@ -154,17 +154,21 @@ not just the plumbing. Build these in order, testing each before the next:
    forces and emitter layout that produce it. This is the "you can now build any style"
    checkpoint.
 
-**Progress:** Steps 1–4 DONE. The `Emitter` table lives in `__constant__ d_emitters`,
+**Progress:** Steps 1–5 DONE. The `Emitter` table lives in `__constant__ d_emitters`,
 uploaded via `upload_emitter()` / `cudaMemcpyToSymbol` (added `SimParams.numEmitters`).
 `spawn()` births particle `i` from emitter `i % numEmitters`: polar `(angle ± spread,
 baseSpeed)` → Cartesian velocity, emitter position/colour, staggered lifetime so the
 stream is continuous, not pulsed. `update_kernel` sums three named forces —
 `gravity` / central attractor (`nbodyStrength`) / `swirl` — into an `(ax, ay)`
 accumulator, then integrates with semi-implicit Euler. A `Preset` table (fireworks /
-fire / nebula) bundles an emitter table with those physics knobs; `set_preset(i)`
+fire / galaxy / Jia) bundles an emitter table with those physics knobs; `set_preset(i)`
 clamps, re-uploads the emitters, and copies the knobs into `params_`. The constructor
-boots preset 0 and number keys **1 / 2 / 3** switch live (the look fades in over ~1
-lifetime as particles recycle). Remaining: **Step 5** — invent your own look.
+boots preset 0 and number keys **1 / 2 / 3 / 4** switch live (the look fades in over ~1
+lifetime as particles recycle). **Step 5 DONE** — two original presets designed from
+scratch: **galaxy** (an orange nucleus parked at the origin, where the swirl/nbody forces
+vanish so it stays tight, plus two offset blue arms the vortex winds into spirals) and
+**Jia** (two point-symmetric pink + gold jets braided by a gentle swirl). Default particle
+count raised to **60k** (still overridable at runtime via `SPARKS_PARTICLES`).
 
 **Real randomness (pulled forward from L6):** the index-derived `frac(i * golden)`
 jitter formed visible *ripples* at low counts (a low-discrepancy sequence shows
@@ -290,11 +294,12 @@ is pedagogical (learn `__half` / `__half2`) and closing L4's scientific loop.
       specifically L2-limited (DRAM 62.9%); Achieved Occupancy 89.3% (not the
       bottleneck). Confirms L3's null result — the wall is total bytes moved, so SoA
       (same bytes, rearranged) can't help; only moving *less* data would.
-- [~] L5 Effects & presets from scratch — **Steps 1–4 DONE** (emitters in
+- [x] L5 Effects & presets from scratch — **DONE** (emitters in
       `__constant__` + `cudaMemcpyToSymbol` upload; `spawn` births from emitter with
       polar→Cartesian launch + staggered life; three named forces —
       gravity / central attractor / swirl — in an `(ax,ay)` accumulator + semi-implicit
-      Euler; `Preset` table + `set_preset` + number-key **1/2/3** switching, ctor boots
-      preset 0). Remaining: **Step 5** invent your own look.
+      Euler; `Preset` table + `set_preset` + number-key **1/2/3/4** switching, ctor boots
+      preset 0). Step 5 — two original presets: **galaxy** (origin nucleus + two
+      swirl-wound arms) and **Jia** (symmetric pink/gold braided jets). Default count 60k.
 - [ ] L6 Realistic simulation & randomness (episodic shell bursts, per-style physics, full per-particle RNG)
 - [ ] L7 Precision & bandwidth *(optional)* — FP16/`__half2` on tolerant fields, re-run L4 Nsight to confirm "fewer bytes ≈ less time"
