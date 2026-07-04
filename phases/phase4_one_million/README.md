@@ -239,6 +239,62 @@ looking procedural and starts looking real.
 > *continuous* model (emitters, staggered life, gravity/nbody/swirl). L5/L6 go beyond it —
 > try each step from the spec first, peek afterward to compare.
 
+**Progress:**
+
+- [x] **Air drag** (groundwork for shell bursts, helps every preset). Wired the unused
+  `SimParams.damping` into `update_kernel`: after integrating velocity, `v *= drag` where
+  `drag = powf(damping, dt * 60.0f)` — frame-rate-independent (`damping` is defined per
+  60 fps frame; the `dt*60` exponent rescales it to the real frame length, same fix as
+  `dt` itself). Added `damping` to the `Preset` struct so each look tunes its own drag
+  (fireworks 0.97 strong / fire 0.99 / galaxy 1.0 frictionless / Jia ~0.9996).
+- [x] Episodic shell bursts (real fireworks) — the headline change; replaces the L5
+  continuous fountain. Implemented as approach A (per-shell state array). A `Shell[numShells]`
+  array + per-shell RNG; **2a** seeds every shell dark with a staggered countdown; **2b**
+  `advance_shells` (one thread/shell, run *before* `update_kernel`) runs each shell's
+  state machine — `live`→`dark` on expiry (random gap), `dark`→relaunch (new random
+  center + palette color + `launch` pulse); **2c** `update_kernel` branches on a per-preset
+  `useShells` flag: on `launch` all of a shell's particles `spawn_burst` together at the
+  center (random full-circle direction, shell color, life = burst time), and the vertex is
+  written off-screen while the shell is `dark` (born-together / die-together / dark gap).
+  Only `fireworks` sets `useShells`; other presets keep the continuous model. Air drag
+  (above) + gravity give the fly-out-then-arc trajectory.
+- [ ] Per-style realistic models (fire turbulence + color cooling, rain, galaxy stable
+  orbits, explosion/smoke).
+- [ ] Randomness everywhere (already partly done — L5.5 moved spawn to per-particle
+  `curandState`; extend to burst timing/location, size, color-over-life).
+
+**Shell design decisions (L6):**
+
+- **Scale target 620k particles**; `numShells` will be **auto = `n / 2500`** (≈2500
+  particles per burst) rather than hardcoded, so shell count scales with `n`
+  (30k→~12, 620k→~250). Currently `numShells = 16` in `main.cpp` for the 30k default.
+- **Shells are for *episodic* styles only** (fireworks, future explosion) — **not**
+  continuous ones. Fire / rain / galaxy get their *own* randomness instead (fire:
+  turbulence + color cooling; rain: wind/size jitter + splash; galaxy: orbit jitter).
+- **Timing = independent staggered cycling** is the default (continuous show). A
+  synchronized-batch "finale/volley" (all launch → all die → full dark → repeat) is an
+  optional future toggle, not default (avoids a full-screen pulse).
+- **Preset switching stays fade-in** (old particles finish their life as the new look
+  fades in). No hard reset-on-switch.
+- **Anti-chaos at high counts = structure, not fewer particles:** grouping (shells),
+  one color per burst, negative space (only ~10–30% of shells live at once via the
+  live/dark ratio), smaller points (2–5px) + fade-by-life, and revisiting additive
+  blend (the right tool at high density, where overlap should read as a brightness
+  gradient — it only looked hazy at *low* count).
+
+> **Known limitation (L5 model, fixed by shell bursts above):** `fireworks` still emits
+> *continuously* from 3 fixed points, so sparks "spread in place" and fall near the
+> emitter rather than launching as a discrete, born-together burst. This is the exact
+> artifact the shell-burst step removes.
+>
+> **Input backlog — key debounce:** `main.cpp` polls `glfwGetKey(... ) == GLFW_PRESS`
+> every frame, so holding a number key re-calls `set_preset` (and re-uploads the emitter
+> table via `cudaMemcpyToSymbol`) *thousands* of times per second. Harmless today but
+> wasteful; add edge detection (fire only on the down-transition: remember last frame's
+> state, act when `now == PRESS && prev == RELEASE`). Folds naturally into the
+> Presentation track's input handling (see PRESENTATION.md), or do it as a one-line
+> cleanup before then.
+
 ### L7 — Precision & bandwidth *(optional / stretch)*
 
 Turns L4's *diagnosis* ("the wall is total bytes moved") into a *measured result*. Do

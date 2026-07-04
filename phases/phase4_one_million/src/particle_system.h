@@ -2,6 +2,27 @@
 #include "particles.h" // Particle, SimParams (shared include/ folder)
 
 // ===========================================================================
+// Shell (L6-2)  --  one firework "shell": a GROUP of particles that share a fate.
+// ===========================================================================
+// The particle pool is split into params_.numShells groups; particle i belongs
+// to shell (i % numShells). Every particle in a shell is born together at one
+// random point, flies out, and dies together -- then the shell goes dark for a
+// random gap before relaunching somewhere new. The whole life-cycle is a tiny
+// state machine advanced once per frame by advance_shells (2b); update_kernel
+// (2c) reads each shell to decide when to (re)spawn its particles and whether to
+// draw them. This replaces the L5 "each particle respawns itself at a fixed
+// emitter" fountain with discrete, episodic bursts.
+// ===========================================================================
+struct Shell
+{
+    float cx, cy;      // burst center  -- picked fresh at each relaunch
+    float cr, cg, cb;  // burst color   -- picked fresh at each relaunch (one color per burst)
+    float timer;       // seconds left in the current phase (counts down)
+    int live;          // 1 = exploding (fly + draw), 0 = dark (invisible, waiting)
+    int launch;        // 1 = relaunched THIS frame -> particles (re)spawn at the center
+};
+
+// ===========================================================================
 // ParticleSystem (Phase 4, L5)  --  fast 1M-particle GPU simulation, SoA layout.
 // ===========================================================================
 // Particles live entirely in GPU memory as a Structure of Arrays (one device
@@ -37,6 +58,10 @@ private:
     cudaGraphicsResource *vbo_resource_ = nullptr; // interop handle for the renderer's VBO
     void *d_rng_ = nullptr;                    // device curandState[n] (one RNG per particle);
                                                // void* so this host header needs no CUDA headers
+    Shell *d_shells_ = nullptr;    // device Shell[numShells] -- the per-shell state machine
+    void *d_shell_rng_ = nullptr;  // device curandState[numShells] -- ONE RNG per shell (not
+                                   // per particle): the shell kernel draws burst center/color/
+                                   // timing. void* for the same header-cleanliness reason as d_rng_.
 public:
     // Constructor: cudaMalloc the 8 SoA arrays and fill them on the GPU via
     // init_kernel. explicit forbids an implicit SimParams->ParticleSystem.

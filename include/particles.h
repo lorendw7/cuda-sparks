@@ -33,6 +33,8 @@ struct SimParams {
     float swirl;          // vortex strength: tangential force around the origin (0 = off).
                           // Positive spins particles counter-clockwise -> spiral galaxy look.
     int numEmitters;
+    int numShells;
+    int useShells;
 };
 
 // ---------------------------------------------------------------------------
@@ -60,4 +62,8 @@ struct Preset
     float gravity;
     float nbodyStrength;
     float swirl;          // vortex strength copied into SimParams by set_preset()
+    float damping;        // air-drag factor (per 60fps-frame); v *= damping each step.
+                          // 1.0 = frictionless, ~0.98 = noticeable drag. MUST be set per
+                          // preset -- an omitted (0) value freezes every particle instantly.
+    int useShells;
 };

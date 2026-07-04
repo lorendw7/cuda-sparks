@@ -12,10 +12,11 @@ __constant__ Emitter d_emitters[MAX_EMITTERS];
 
 // ===========================================================================
 // presets  --  the effect library (L5-4).  One Preset bundles an emitter table
-// with the three physics knobs (gravity / nbodyStrength / swirl) that shape it.
+// with the physics knobs (gravity / nbodyStrength / swirl / damping) that shape it.
 // ===========================================================================
 // Field order matches the struct: { emitters[MAX_EMITTERS], numEmitters, gravity,
-// nbodyStrength, swirl }. Only the first numEmitters rows are used; the rest are
+// nbodyStrength, swirl, damping }. damping (L6-1) is air drag: v *= damping each
+// step -- 1.0 frictionless, <1 decelerates. Only the first numEmitters rows are used; the rest are
 // zero-filled by the aggregate initializer and never uploaded. Add/remove a whole
 // Preset here and numPresets (below) + the number keys in main.cpp pick it up.
 //   0 fireworks -- scattered full-circle bursts, positive gravity (fall)
@@ -37,6 +38,12 @@ static const Preset presets[] = {
         0.45f,     // gravity
         0.000012f, // nbodyStrength
         0.4f,      // swirl
+        0.97f,     // damping -- strong drag. NOTE this is still the L5 CONTINUOUS-fountain
+                   //   model: 3 fixed points emit non-stop, so sparks puff out & fall near
+                   //   the emitter ("spread in place") rather than a real fly-out-and-arc
+                   //   burst. Raise toward 0.99 to let them travel farther; the true
+                   //   born-together / explode / die-together look arrives with L6 shell bursts.
+        1,
     },
     // ---- 1: fire -- 3 narrow upward jets along the bottom, buoyant (negative gravity), warm ----
     {
@@ -49,6 +56,8 @@ static const Preset presets[] = {
         -0.5f,
         0.000006f,
         0.0f,
+        0.99f, // damping -- light drag so the flames settle instead of shooting off
+        0,
     },
     // ---- 2: galaxy -- warm orange core + two cool arms, wound by swirl into a spinning disk ----
     // The orange source sits AT the origin (0,0): swirl/nbody are both centered there, so a
@@ -58,14 +67,16 @@ static const Preset presets[] = {
     {
         {
             //  x     y   angle  spread  baseSpd  r    g    b     life
-            {-0.5f, 0.0f, 0.0f, 6.2832f, 0.25f, 0.3f, 0.4f, 1.0f,  9.0f}, // cool arm #1 (blue)
-            { 0.0f, 0.0f, 0.0f, 6.2832f, 0.06f, 1.0f, 0.6f, 0.15f, 3.5f}, // warm orange core
-            { 0.5f, 0.0f, 0.0f, 6.2832f, 0.25f, 0.5f, 0.6f, 1.0f, 9.0f},  // cool arm #2 (lighter blue)
+            {-0.5f, 0.0f, 0.0f, 6.2832f, 0.25f, 0.3f, 0.4f, 1.0f, 9.0f}, // cool arm #1 (blue)
+            {0.0f, 0.0f, 0.0f, 6.2832f, 0.06f, 1.0f, 0.6f, 0.15f, 3.5f}, // warm orange core
+            {0.5f, 0.0f, 0.0f, 6.2832f, 0.25f, 0.5f, 0.6f, 1.0f, 9.0f},  // cool arm #2 (lighter blue)
         },
         3,        // numEmitters
         0.0f,     // gravity        -- 0: keep the disk round, not squashed downward
         0.00003f, // nbodyStrength  -- inward pull that tightens the disk (balance this vs swirl)
         1.2f,     // swirl          -- orbital spin; winds the two offset arms into spirals
+        1.0f,     // damping        -- 1.0 = frictionless, so orbits stay stable & long-lived
+        0,
     },
     // ---- 3: Jia -- two diagonal jets (pink + gold) bent into arms by a gentle swirl ----
     // Each source fires a directional fan (spread = 1.8 rad, ~103 deg) aimed diagonally,
@@ -81,7 +92,9 @@ static const Preset presets[] = {
         2,        // numEmitters
         0.0f,     // gravity        -- 0: keep the spiral round, not squashed downward
         0.00002f, // nbodyStrength  -- a light inward leash so the arms don't fly to the walls
-        0.62f,     // swirl          -- gentle counter-clockwise vortex braids the two colors
+        0.62f,    // swirl          -- gentle counter-clockwise vortex braids the two colors
+        0.99962f, // damping        -- very light drag keeps the braided jets tight
+        0,
     }};
 
 static const int numPresets = sizeof(presets) / sizeof(presets[0]);
@@ -91,7 +104,8 @@ static const int numPresets = sizeof(presets) / sizeof(presets[0]);
 // ===========================================================================
 // Clamp i into range, then (1) re-upload that preset's emitter table into
 // __constant__ memory via upload_emitter (which also sets params_.numEmitters),
-// and (2) copy its three physics knobs into params_ so the next update_kernel
+// and (2) copy its physics knobs (gravity/nbodyStrength/swirl/damping) + the
+// useShells mode flag (L6-2) into params_ so the next update_kernel
 // launch uses them. Cheap: no realloc, no init_kernel -- the 1M particles already
 // alive keep flying and only adopt the new look as they recycle, so a switch
 // fades in over roughly one lifetime (a feature, not a bug).
@@ -114,6 +128,44 @@ void ParticleSystem::set_preset(int i)
     params_.gravity = pr.gravity;
     params_.nbodyStrength = pr.nbodyStrength;
     params_.swirl = pr.swirl;
+    params_.damping = pr.damping;
+    params_.useShells = pr.useShells;
+}
+
+// A small palette of saturated firework colors; advance_shells picks one per burst.
+// __device__ = lives in GPU memory, readable by kernels. Colors are yours to pick;
+// keep them BRIGHT & saturated (real fireworks are single vivid hues, never muddy).
+__device__ const float palette[][3] = {
+    {1.0f, 0.3f, 0.3f}, // red
+    {1.0f, 0.8f, 0.2f}, // gold
+    {0.3f, 0.6f, 1.0f}, // blue
+    {0.5f, 1.0f, 0.4f}, // green
+    {1.0f, 0.4f, 0.9f}, // magenta
+    {0.4f, 1.0f, 1.0f}, // cyan
+};
+
+// ===========================================================================
+// spawn_burst  --  born particle i from a SHELL, not an emitter.  (L6-2)
+// ===========================================================================
+// The shell-mode counterpart of spawn(): update_kernel calls this on the frame a
+// shell relaunches (shell.launch==1), so all of a shell's particles appear together
+// at its center. Unlike spawn() (emitter aim + spread), a burst fires in a random
+// FULL-CIRCLE direction with a random speed from 0 (so the bloom is a filled disk,
+// not a hollow ring), wears the shell's single color, and takes the shell's remaining
+// burst time as its life so it fades in step with the shell.
+// ===========================================================================
+__device__ inline void spawn_burst(ParticleSoA p, int i, Shell sh, curandState *st)
+{
+    float a = curand_uniform(st) * 6.2832f; // random direction over the full circle (2*pi)
+    float s = curand_uniform(st) * 0.8;     // random speed 0..0.8 -> a filled disk of sparks
+    p.vx[i] = cosf(a) * s;                  // polar (a, s) -> Cartesian velocity
+    p.vy[i] = sinf(a) * s;
+    p.x[i] = sh.cx; // born at the shell's burst center
+    p.y[i] = sh.cy;
+    p.cr[i] = sh.cr; // wear the shell's one burst color
+    p.cg[i] = sh.cg;
+    p.cb[i] = sh.cb;
+    p.life[i] = sh.timer; // life = shell's remaining burst time -> fades with the shell
 }
 
 // ===========================================================================
@@ -180,6 +232,87 @@ __global__ void init_rng(curandState *rng, int n, unsigned long long seed)
 }
 
 // ===========================================================================
+// advance_shells  --  run each shell's state machine one step.  (every frame)
+// ===========================================================================
+// L6-2 heart. One GPU thread per shell (s = numShells, ~16). Each shell is a tiny
+// two-phase state machine advanced by its own countdown `timer`:
+//   live=1 (exploding): timer counts down the burst's lifetime; on expiry -> go
+//           dark (live=0) and set a random dark-gap countdown.
+//   live=0 (dark):      timer counts down the dark gap; on expiry -> RELAUNCH:
+//           pick a new random center + a palette color, set a random burst
+//           lifetime, live=1, and raise launch=1 for THIS frame only.
+// `launch` is the one-frame pulse update_kernel (2c) reads to (re)spawn this
+// shell's particles at the new center. It is cleared at the TOP every frame, so
+// it is 1 for exactly the relaunch frame and 0 otherwise -- which is why this
+// kernel MUST run BEFORE update_kernel each frame (so the pulse is fresh). One
+// RNG per shell (rng[i]) draws the center / color / timings.
+// ===========================================================================
+__global__ void advance_shells(Shell *shells, int s, float dt, curandState *rng)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= s)
+    {
+        return;
+    }
+
+    shells[i].launch = 0;  // default: not a launch frame (may be re-raised below)
+    shells[i].timer -= dt; // advance the current phase's countdown
+
+    if (shells[i].timer <= 0.0f) // current phase finished -> switch state
+    {
+        if (shells[i].live) // ---- was exploding -> go dark ----
+        {
+            shells[i].live = 0;
+            shells[i].timer = 0.5f + curand_uniform(&rng[i]) * 2.0f; // random dark gap 0.5..2.5s
+        }
+        else // ---- dark gap over -> relaunch somewhere new ----
+        {
+            shells[i].live = 1;
+            shells[i].launch = 1;                                     // pulse: tells update_kernel to respawn this shell's particles
+            shells[i].cx = ((curand_uniform(&rng[i]) - 0.5f) * 1.6f); // new center x in (-0.8,0.8]
+            shells[i].cy = ((curand_uniform(&rng[i]) - 0.5f) * 1.6f); // new center y in (-0.8,0.8]
+
+            // Pick one palette color for the whole burst (one vivid hue per firework).
+            int np = sizeof(palette) / sizeof(palette[0]); // color count (sizeof idiom)
+            int c = (int)(curand_uniform(&rng[i]) * np);   // random index [0, np)
+            if (c >= np)                                   // curand_uniform is (0,1] -> can hit 1.0
+            {
+                c = np - 1; // clamp the 1.0 case out of bounds
+            }
+
+            shells[i].cr = palette[c][0];
+            shells[i].cg = palette[c][1];
+            shells[i].cb = palette[c][2];
+            shells[i].timer = 1.5f + curand_uniform(&rng[i]) * 1.0f; // random burst lifetime 1.5..2.5s
+        }
+    }
+}
+
+// ===========================================================================
+// init_shells  --  seed the shell state machine.  (runs ONCE, at startup)
+// ===========================================================================
+// Start EVERY shell DARK with a staggered countdown (curand_uniform * 3s), so
+// they don't all launch on the same frame -> bursts appear at different times.
+// center/color are left 0 here; they get their real values at the first relaunch
+// (in advance_shells, 2b), when the dark timer runs out. One RNG per shell (rng[i]).
+// ===========================================================================
+__global__ void init_shells(Shell *shells, int s,
+                            curandState *rng)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= s)
+        return;
+    shells[i].live = 0;                               // dark: not exploding yet
+    shells[i].launch = 0;                             // not a launch frame
+    shells[i].timer = curand_uniform(&rng[i]) * 3.0f; // staggered dark countdown (0..3s)
+    shells[i].cx = 0.0f;                              // center/color are chosen at relaunch, not here
+    shells[i].cy = 0.0f;
+    shells[i].cr = 0.0f;
+    shells[i].cg = 0.0f;
+    shells[i].cb = 0.0f;
+}
+
+// ===========================================================================
 // init_kernel  --  build the whole initial population on the GPU.  (runs ONCE)
 // ===========================================================================
 // One thread per particle calls spawn(), drawing from its own curandState (so
@@ -198,14 +331,18 @@ __global__ void init_kernel(ParticleSoA p, int n, int numEmitters, curandState *
 // update_kernel  --  advance one particle AND write its vertex.  (every frame)
 // ===========================================================================
 // One GPU thread per particle: sum three forces (gravity + central attractor +
-// swirl) into an acceleration, integrate position, bounce off the 4 walls, age,
-// recycle the dead -- then (L2 interop) pack the result as
-// [x,y,r,g,b] straight into the OpenGL VBO via the mapped pointer `vbo`. No copy
-// to the CPU: physics and vertex output both land in device memory this frame.
+// swirl) into an acceleration, integrate velocity, apply air drag (L6-1), move
+// the position, bounce off the 4 walls, then age/respawn -- which now BRANCHES on
+// params.useShells (L6-2): shell presets (fireworks) respawn a particle only when
+// its shell relaunches (shell.launch) and hide it while its shell is dark; other
+// presets keep the L5 continuous model (respawn the moment life hits 0). Finally
+// (L2 interop) it packs [x,y,r,g,b] straight into the OpenGL VBO via `vbo` (or, for
+// a dark shell, writes the vertex off-screen so GL clips it). No copy to the CPU.
 // params is passed BY VALUE (a copy per thread) -- use params.gravity (dot),
-// never params_ (that member is invisible here).
+// never params_ (that member is invisible here). `shells` is the per-shell state
+// array, already advanced this frame by advance_shells (must run first).
 // ===========================================================================
-__global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params, float dt, curandState *rng)
+__global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params, float dt, curandState *rng, Shell *shells)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x; // global thread id = particle index
     if (i >= n)                                    // grid usually rounds up past n:
@@ -246,6 +383,17 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
     // ordering (not position-first) keeps orbits stable, which swirl needs.
     p.vx[i] += ax * dt; // v += a*dt   (acceleration changes velocity)
     p.vy[i] += ay * dt;
+
+    // Air drag (L6-1): scale velocity down a hair each step -> exponential decay,
+    // so a fast spark decelerates and arcs instead of flying straight to the wall.
+    // damping is defined per 60fps-frame; powf(damping, dt*60) rescales it to THIS
+    // frame's real length so the drag-per-second is identical at any FPS (same
+    // frame-rate-independence fix as dt itself -- a plain v*=damping would drag
+    // ~50x harder at thousands of FPS).
+    float drag = powf(params.damping, dt * 60.0f);
+    p.vx[i] *= drag;
+    p.vy[i] *= drag;
+
     p.x[i] += p.vx[i] * dt; // x += v*dt   (velocity changes position)
     p.y[i] += p.vy[i] * dt;
 
@@ -272,10 +420,23 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
         p.vy[i] = -p.vy[i] * params.restitution;
     }
 
-    p.life[i] -= dt;       // age this particle
-    if (p.life[i] <= 0.0f) // dead? recycle it in place (deterministic)
+    // --- Age / respawn: two models, chosen per preset (L6-2) ------------------
+    if (params.useShells) // shell model (fireworks): the shell drives birth/death
     {
-        spawn(p, i, params.numEmitters, &rng[i]); // recycle a dead particle from its emitter (same rule as init)
+        int sh = i % params.numShells; // which shell this particle belongs to
+        if (shells[sh].launch)         // shell relaunched THIS frame -> born together at its center
+        {
+            spawn_burst(p, i, shells[sh], &rng[i]);
+        }
+        p.life[i] -= dt; // still age, for the color fade below (visibility gated on shell.live)
+    }
+    else // continuous model (L5): each particle respawns itself the instant it dies
+    {
+        p.life[i] -= dt;
+        if (p.life[i] <= 0.0f)
+        {
+            spawn(p, i, params.numEmitters, &rng[i]);
+        }
     }
 
     // --- Write this particle's vertex straight into the VBO (must be AFTER the
@@ -292,12 +453,32 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
         fade = 1.0f;
     }
 
+    // Visibility gate (L6-2): a particle whose shell is DARK is hidden. Non-shell
+    // presets are always visible. (Hidden = written off-screen below, not colored
+    // black -- a black dot would still draw a visible dark disc under alpha blend.)
+    int visible = 1;
+    if (params.useShells && shells[i % params.numShells].live == 0)
+    {
+        visible = 0;
+    }
+
     float *v = &vbo[i * 5]; // this particle's 5 floats inside the VBO
-    v[0] = p.x[i];          // attribute 0 (pos.x) -- shader reads offset 0
-    v[1] = p.y[i];          // attribute 0 (pos.y)
-    v[2] = p.cr[i] * fade;  // attribute 1 (color.r) -- shader reads offset 8
-    v[3] = p.cg[i] * fade;  // attribute 1 (color.g)
-    v[4] = p.cb[i] * fade;  // attribute 1 (color.b)
+    if (visible)
+    {
+        v[0] = p.x[i];         // attribute 0 (pos.x) -- shader reads offset 0
+        v[1] = p.y[i];         // attribute 0 (pos.y)
+        v[2] = p.cr[i] * fade; // attribute 1 (color.r) -- shader reads offset 8
+        v[3] = p.cg[i] * fade; // attribute 1 (color.g)
+        v[4] = p.cb[i] * fade; // attribute 1 (color.b)
+    }
+    else
+    {
+        v[0] = -2.0f;
+        v[1] = -2.0f;
+        v[2] = 0.0f;
+        v[3] = 0.0f;
+        v[4] = 0.0f;
+    }
 }
 
 // ===========================================================================
@@ -322,6 +503,9 @@ ParticleSystem::ParticleSystem(const SimParams &p) // definition of the ctor dec
     CUDA_CHECK(cudaMalloc(&d_.cg, bytes));
     CUDA_CHECK(cudaMalloc(&d_.cb, bytes));
     CUDA_CHECK(cudaMalloc(&d_rng_, (size_t)n_ * sizeof(curandState)));
+    // L6-2: the shell state array + its own (smaller) RNG pool, one per shell.
+    CUDA_CHECK(cudaMalloc(&d_shells_, (size_t)params_.numShells * sizeof(Shell)));
+    CUDA_CHECK(cudaMalloc(&d_shell_rng_, (size_t)params_.numShells * sizeof(curandState)));
 
     // Boot the default look (preset 0). set_preset uploads its emitter table into
     // __constant__ memory and sets params_.numEmitters -- so it MUST run before
@@ -331,6 +515,15 @@ ParticleSystem::ParticleSystem(const SimParams &p) // definition of the ctor dec
     init_rng<<<grid, block>>>((curandState *)d_rng_, n_, 1025ULL);
     CUDA_CHECK(cudaGetLastError());
     init_kernel<<<grid, block>>>(d_, n_, params_.numEmitters, (curandState *)d_rng_); // params_.numEmitters was set by set_preset(0) -> upload_emitter above
+    CUDA_CHECK(cudaGetLastError());
+
+    // L6-2: seed the shell RNG (reuse init_rng, different seed) then init_shells to
+    // put every shell in the DARK/staggered start state. Separate grid sized to
+    // numShells (128), not n. Order doesn't depend on the particle init above.
+    int sblock = 256, sgrid = (params_.numShells + sblock - 1) / sblock;
+    init_rng<<<sgrid, sblock>>>((curandState *)d_shell_rng_, params_.numShells, 2049ULL);
+    CUDA_CHECK(cudaGetLastError());
+    init_shells<<<sgrid, sblock>>>(d_shells_, params_.numShells, (curandState *)d_shell_rng_);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -394,10 +587,12 @@ ParticleSystem::~ParticleSystem()
     cudaFree(d_.cg);
     cudaFree(d_.cb);
     cudaFree(d_rng_);
+    cudaFree(d_shells_);    // L6-2: shell state array
+    cudaFree(d_shell_rng_); // L6-2: shell RNG pool
 }
 
 // ===========================================================================
-// update  --  map the VBO, run the kernel straight into it, unmap.  (per frame)
+// update  --  map the VBO, run the shell + particle kernels into it, unmap.  (per frame)
 // ===========================================================================
 // The L2 heart. No cudaMemcpy, no host_ mirror, no CPU pack: the kernel writes
 // vertices directly into the OpenGL VBO. map/unmap are the per-frame handshake
@@ -416,10 +611,17 @@ void ParticleSystem::update(float dt)
     CUDA_CHECK(cudaGraphicsResourceGetMappedPointer(
         (void **)&d_vbo, &bytes, vbo_resource_));
 
-    // 3) Launch: physics into the SoA arrays (d_), vertices into d_vbo, one kernel.
+    // 3) Launch TWO kernels, in order (L6-2): advance_shells FIRST (advances the
+    //    per-shell state machine so this frame's launch/live flags are fresh), then
+    //    update_kernel, which reads those flags to spawn/hide particles + writes the
+    //    vertices straight into d_vbo. Order matters -- update_kernel must see the
+    //    shell state advance_shells just produced.
+    int sblock = 256, sgrid = (params_.numShells + sblock - 1) / sblock;
+    advance_shells<<<sgrid, sblock>>>(d_shells_, params_.numShells, dt, (curandState *)d_shell_rng_);
+    CUDA_CHECK(cudaGetLastError());
     int block = 256;
     int grid = (n_ + block - 1) / block;
-    update_kernel<<<grid, block>>>(d_, d_vbo, n_, params_, dt, (curandState *)d_rng_);
+    update_kernel<<<grid, block>>>(d_, d_vbo, n_, params_, dt, (curandState *)d_rng_, d_shells_);
     CUDA_CHECK(cudaGetLastError());
 
     // 4) Return the VBO: CUDA -> GL. Waits for the kernel to finish, so the

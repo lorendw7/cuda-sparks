@@ -65,6 +65,7 @@ int main()
         {
             params.n = 1;
         }
+        params.numShells = 16; // L6-2: firework shells (groups). Particles per shell = n / 16.
 
         params.gravity = 0.0f;       // (overridden by preset)
         params.nbodyStrength = 0.0f; // (overridden by preset)
