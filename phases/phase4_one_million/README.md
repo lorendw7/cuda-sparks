@@ -168,7 +168,7 @@ lifetime as particles recycle). **Step 5 DONE** — two original presets designe
 scratch: **galaxy** (an orange nucleus parked at the origin, where the swirl/nbody forces
 vanish so it stays tight, plus two offset blue arms the vortex winds into spirals) and
 **Jia** (two point-symmetric pink + gold jets braided by a gentle swirl). Default particle
-count raised to **60k** (still overridable at runtime via `SPARKS_PARTICLES`).
+count is **30k** (sparse enough to stay crisp; overridable at runtime via `SPARKS_PARTICLES`).
 
 **Real randomness (pulled forward from L6):** the index-derived `frac(i * golden)`
 jitter formed visible *ripples* at low counts (a low-discrepancy sequence shows
@@ -300,6 +300,6 @@ is pedagogical (learn `__half` / `__half2`) and closing L4's scientific loop.
       gravity / central attractor / swirl — in an `(ax,ay)` accumulator + semi-implicit
       Euler; `Preset` table + `set_preset` + number-key **1/2/3/4** switching, ctor boots
       preset 0). Step 5 — two original presets: **galaxy** (origin nucleus + two
-      swirl-wound arms) and **Jia** (symmetric pink/gold braided jets). Default count 60k.
+      swirl-wound arms) and **Jia** (symmetric pink/gold braided jets). Default count 30k.
 - [ ] L6 Realistic simulation & randomness (episodic shell bursts, per-style physics, full per-particle RNG)
 - [ ] L7 Precision & bandwidth *(optional)* — FP16/`__half2` on tolerant fields, re-run L4 Nsight to confirm "fewer bytes ≈ less time"

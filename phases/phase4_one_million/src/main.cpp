@@ -1,6 +1,6 @@
 // Phase 4 (L2-L5) -- window + GL context, then run the 1M-particle sim each frame.
 // CUDA-GL interop: the kernel writes vertices straight into the VBO (no CPU round
-// trip). Number keys 1/2/3 switch effect presets (fireworks / fire / galaxy).
+// trip). Number keys 1/2/3/4 switch effect presets (fireworks / fire / galaxy / Jia).
 // SPARKS_MAX_FRAMES caps the loop so Nsight application-replay can profile it.
 // glad must be included before glfw.
 #include <glad/gl.h>
@@ -56,11 +56,11 @@ int main()
         // the local dt in the render loop, not params.dt).
         SimParams params{};
         // Particle count knob: env var SPARKS_PARTICLES overrides the default so you
-        // can A/B different counts without recompiling. Default 60k -- dense enough to
-        // fill the galaxy disk and arms, still cheap. 1M is the perf-lesson stress
-        // figure, set via the env var.
+        // can A/B different counts without recompiling. Default 30k -- sparse enough that
+        // the dots stay separate and crisp instead of an over-dense blur. 1M is the
+        // perf-lesson stress figure, set via the env var.
         const char *nEnv = std::getenv("SPARKS_PARTICLES");
-        params.n = nEnv ? std::atol(nEnv) : 60000;
+        params.n = nEnv ? std::atol(nEnv) : 30000;
         if (params.n < 1)
         {
             params.n = 1;
