@@ -95,13 +95,18 @@ result, then move on. Current status:
 Phase 1 (CPU)   ✅ L1 physics  ✅ L2 bounce  ✅ L3 shaders
 Phase 2 (CUDA)  ✅ L1 kernel + memory  ✅ L2 curand  ✅ L3 measure speedup
 Phase 3         ✅ L1 gravity well  ✅ L2 naive N-body (O(n^2))  ✅ L3 __shared__ tiling
-                ✅ L4 multiple emitters (__constant__)  ✅ L5 effect presets (keys 1/2/3)
-Phase 4         ▶  L1 scale to 1M + measure the bottleneck (in progress)
-                   then CUDA–OpenGL interop, SoA, Nsight; rendering layer built from scratch
-Phase 5         ·  procedurally-generated audio: event SFX → ambient beds → audio-reactive
+                ✅ L4 multiple emitters (__constant__)  ✅ L5 effect presets (keys 1/2/3/4)  — complete
+Phase 4         ✅ L1 scale to 1M + measure  ✅ L2 CUDA–OpenGL interop  ✅ L3 SoA  ✅ L4 Nsight
+                ✅ L5 effects/presets from scratch   ▶ L6 realistic sim (next)   ○ L7 FP16 (optional)
+                + app tracks on the same binary: Presentation (menu/fullscreen/auto-play) → Audio
+Phase 5         ·  audio (procedural: event SFX → ambient beds → audio-reactive) — built into the
+                   Phase-4 app as a track; plan in phases/phase4_one_million/AUDIO.md
 ```
 
-The project has **five phases** in total (CPU → CUDA → effects → one million → audio).
+The project's learning arc is **five phases** (CPU → CUDA → effects → one million → audio). The last
+two pieces — the presentation/UX shell and the audio layer — extend the *same* Phase-4 program, so
+their code lives in `phase4_one_million/src/` and their plans in that folder's `PRESENTATION.md` /
+`AUDIO.md` rather than in separate phase folders.
 
 ---
 

@@ -3,6 +3,13 @@
 > **Goal:** push the particle count from ~10,000 to **1,000,000** and keep it smooth.
 > In this phase you write **100% of the code from scratch** (rendering layer included);
 > I only provide the spec, function signatures, and gotchas line by line.
+>
+> **Documents.** This README is the CUDA / performance spine (levels **L1–L7**). Two
+> further tracks that turn the finished sim into a polished demo live in their own files,
+> layered onto the **same** `src/` codebase (no forked folders):
+> **[PRESENTATION.md](PRESENTATION.md)** (menu / fullscreen / auto-play) and
+> **[AUDIO.md](AUDIO.md)** (procedural, zero-license sound). See
+> *[Beyond the CUDA levels](#beyond-the-cuda-levels--application-tracks)* below.
 
 ---
 
@@ -248,6 +255,29 @@ is pedagogical (learn `__half` / `__half2`) and closing L4's scientific loop.
 
 ---
 
+## Beyond the CUDA levels — application tracks
+
+L1–L7 above are the CUDA / performance spine of Phase 4. Two further tracks turn the
+finished simulation into a polished, shippable demo. They are **layered onto the same
+`phase4_one_million/src` codebase** (no forked folders — a menu or a sound engine does not
+justify re-copying the whole 1M sim) but documented in their own files so the CUDA story
+here stays clean. Build them in this order:
+
+1. **[Presentation & UX](PRESENTATION.md)** — an on-screen **Dear ImGui** menu, a real
+   **fullscreen** mode (square sim area on the shorter screen edge + a hacker-style
+   telemetry HUD in the leftover strip), and a hands-off **auto-play** loop. Pure
+   C++/GLFW/OpenGL app-shell work — **no kernel changes**. Do it **after L6** (browse
+   *good-looking* presets, not ugly ones).
+2. **[Audio](AUDIO.md)** — **procedurally generated, zero-license** sound: event SFX →
+   per-preset ambient beds → an **audio-reactive** layer driven by a scalar sampled from
+   the live GPU sim. Do it **after Presentation** — it plugs straight into the menu
+   (volume / mute) and auto-play (advance on the beat).
+
+*(L7 is an optional stretch and can be done any time after L6; it does not block these
+tracks.)*
+
+---
+
 ## Files you'll write from scratch in `src/`
 
 (names are suggestions)
@@ -258,8 +288,9 @@ is pedagogical (learn `__half` / `__half2`) and closing L4's scientific loop.
 | `particle_system.{h,cu}` | 1M-particle GPU simulation + interop + SoA |
 | `main.cpp` | window + main loop + input + the three-segment timing |
 
-> I'll give the spec, function signatures, and gotchas at the start of each file / level,
-> but you type every line yourself.
+> The Presentation and Audio tracks add their own files to this same `src/` (e.g. a
+> `hud.*` / `audio.*`); see their docs. I'll give the spec, function signatures, and
+> gotchas at the start of each file / level, but you type every line yourself.
 
 ---
 
@@ -303,3 +334,10 @@ is pedagogical (learn `__half` / `__half2`) and closing L4's scientific loop.
       swirl-wound arms) and **Jia** (symmetric pink/gold braided jets). Default count 30k.
 - [ ] L6 Realistic simulation & randomness (episodic shell bursts, per-style physics, full per-particle RNG)
 - [ ] L7 Precision & bandwidth *(optional)* — FP16/`__half2` on tolerant fields, re-run L4 Nsight to confirm "fewer bytes ≈ less time"
+
+### Application tracks (layered on the finished sim — separate docs)
+
+- [ ] Presentation & UX — see **[PRESENTATION.md](PRESENTATION.md)** (auto-play +
+      manual toggle, fullscreen square viewport + telemetry HUD, Dear ImGui menu). After L6.
+- [ ] Audio — see **[AUDIO.md](AUDIO.md)** (procedural event SFX → ambient beds →
+      audio-reactive). After Presentation. (Was "Phase 5" in the roadmap.)

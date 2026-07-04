@@ -24,12 +24,19 @@ can run, and the parts where the real learning happens are left for **you** to w
 | **1 — CPU Baseline** | 10,000 particles on the CPU, rendered with OpenGL | C++ sim loop, OpenGL points, frame timing, a reference benchmark | `ParticleSystem::update()` on the CPU |
 | **2 — CUDA Migration** | Move the physics to a GPU kernel | `cudaMalloc` / `cudaMemcpy`, thread indexing, `curandState` RNG, your first speedup | the update **kernel** + init **kernel** |
 | **3 — Effects** | Gravity, collisions, color fade by lifetime | `__shared__` memory, tiling, `__syncthreads()` | force & interaction kernels |
-| **4 — One Million** | 1,000,000 particles at interactive frame rates | CUDA–OpenGL interop, profiling with **Nsight**, memory-layout (SoA) optimization | the optimized pipeline **and the rendering layer from scratch** |
+| **4 — One Million** | 1,000,000 particles at interactive frame rates | CUDA–OpenGL interop, profiling with **Nsight**, memory-layout (SoA) optimization | the optimized pipeline, **the rendering layer from scratch**, and a presentation shell (menu / fullscreen / auto-play) |
 | **5 — Audio** | Procedurally-generated, audio-reactive sound | real-time audio with miniaudio, code-synthesized SFX, driving sound from live sim state | the audio layer (event → ambient → reactive) |
 
 Phase 1 is in [`phases/phase1_cpu_baseline/`](phases/phase1_cpu_baseline/). Each later phase appears
 as you finish the one before it.
 
+> **Where the later work lives.** The **presentation/UX shell** and the **audio layer** both
+> *extend the same Phase-4 application* (one `main.cpp` / renderer / sim), so rather than fork new
+> phase folders they are built into `phase4_one_million/src/` and planned in their own docs there:
+> [`PRESENTATION.md`](phases/phase4_one_million/PRESENTATION.md) (menu, fullscreen, auto-play) and
+> [`AUDIO.md`](phases/phase4_one_million/AUDIO.md) (the Phase-5 audio track). Phase 4's
+> [`README.md`](phases/phase4_one_million/README.md) stays the CUDA/performance spine (L1–L7).
+>
 > **New here? Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) first** — it maps how every piece
 > fits together and exactly which code is yours to write vs. provided plumbing.
 
@@ -108,9 +115,11 @@ cuda-sparks/
     │       ├── particle_system.cu ← YOUR work: emitters + swirl + tiled N-body kernels
     │       └── renderer.h/.cpp    ← OpenGL point renderer (fully commented reference)
     └── phase4_one_million/
-        ├── README.md          ← the lesson: read this first
+        ├── README.md          ← CUDA / performance spine: levels L1–L7 (read first)
+        ├── PRESENTATION.md    ← app track: menu / fullscreen / auto-play (after L6)
+        ├── AUDIO.md           ← app track: procedural, audio-reactive sound (the Phase-5 layer)
         ├── CMakeLists.txt
-        └── src/
+        └── src/               ← one codebase for the sim + both app tracks
             ├── main.cpp           ← window + main loop + preset keys + timing
             ├── renderer.h/.cpp    ← YOUR work: hand-written GL point renderer (RAII class)
             ├── particle_system.h  ← host-side class interface (SoA + interop)
