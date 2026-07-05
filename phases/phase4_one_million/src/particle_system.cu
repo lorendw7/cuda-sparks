@@ -15,18 +15,41 @@ __constant__ Emitter d_emitters[MAX_EMITTERS];
 // with the physics knobs (gravity / nbodyStrength / swirl / damping) that shape it.
 // ===========================================================================
 // Field order matches the struct: { emitters[MAX_EMITTERS], numEmitters, gravity,
-// nbodyStrength, swirl, damping }. damping (L6-1) is air drag: v *= damping each
+// nbodyStrength, swirl, damping, useShells, useRain, wind }. damping (L6-1) is air drag: v *= damping each
 // step -- 1.0 frictionless, <1 decelerates. Only the first numEmitters rows are used; the rest are
 // zero-filled by the aggregate initializer and never uploaded. Add/remove a whole
 // Preset here and numPresets (below) + the number keys in main.cpp pick it up.
-//   0 fireworks -- scattered full-circle bursts, positive gravity (fall)
-//   1 fire      -- bottom row aimed up, negative gravity (buoyant rise), warm
-//   2 galaxy    -- warm orange core + two cool arms; swirl winds them into a spinning disk
-//   3 Jia       -- two diagonal jets (pink + gold), gentle swirl curves them into
-//                  winding arms, no gravity
+//   0 Jia       -- two diagonal jets (pink + gold), gentle swirl curves them into
+//                  winding arms, no gravity (the default look; J key)
+//   1 fireworks -- scattered full-circle bursts, positive gravity (fall)
+//   2 fire      -- bottom row aimed up, negative gravity (buoyant rise), warm
+//   3 galaxy    -- warm orange core + two cool arms; swirl winds them into a spinning disk
+//   4 rain      -- drops spawn at a random x across the top and fall under gravity,
+//                  land and linger on the floor as a puddle, then respawn up top
+//                  (useRain + spawn_rain -> a full-width curtain with a wet floor)
 // ===========================================================================
 static const Preset presets[] = {
-    // ---- 0: fireworks -- 3 full-circle bursts, fast launch, slight swirl, fall under gravity ----
+    // ---- 0: Jia -- two diagonal jets (pink + gold) bent into arms by a gentle swirl ----
+    // Each source fires a directional fan (spread = 1.8 rad, ~103 deg) aimed diagonally,
+    // so here the angle field DOES steer the stream (unlike the full-circle presets above).
+    // Placed on opposite corners (upper-left / lower-right); the +swirl vortex curves the
+    // two jets so the pink and gold streams wind around the center instead of flying off.
+    {
+        {
+            //  x     y     angle    spread  baseSpd  r    g     b     life
+            {-0.6f, 0.8f, -0.785f, 1.8f, 0.2f, 1.0f, 0.71f, 0.76f, 8.0f}, // light pink, upper-left
+            {0.6f, -0.8f, 2.356f, 1.8f, 0.2f, 1.0f, 0.84f, 0.0f, 8.0f},   // gold, lower-right
+        },
+        2,        // numEmitters
+        0.0f,     // gravity        -- 0: keep the spiral round, not squashed downward
+        0.00002f, // nbodyStrength  -- a light inward leash so the arms don't fly to the walls
+        0.62f,    // swirl          -- gentle counter-clockwise vortex braids the two colors
+        0.99962f, // damping        -- very light drag keeps the braided jets tight
+        0,
+        0,
+        0.0f, // useShells, useRain, wind
+    },
+    // ---- 1: fireworks -- 3 full-circle bursts, fast launch, slight swirl, fall under gravity ----
     {
         {
             //  x     y   angle  spread  baseSpd  r    g    b    life
@@ -44,8 +67,10 @@ static const Preset presets[] = {
                    //   burst. Raise toward 0.99 to let them travel farther; the true
                    //   born-together / explode / die-together look arrives with L6 shell bursts.
         1,
+        0,
+        0.0f, // useShells, useRain, wind
     },
-    // ---- 1: fire -- 3 narrow upward jets along the bottom, buoyant (negative gravity), warm ----
+    // ---- 2: fire -- 3 narrow upward jets along the bottom, buoyant (negative gravity), warm ----
     {
         {
             {-0.15f, -0.9f, 1.5708f, 0.28f, 0.9f, 1.0f, 0.3f, 0.05f, 3.0f}, // deep red
@@ -58,8 +83,10 @@ static const Preset presets[] = {
         0.0f,
         0.99f, // damping -- light drag so the flames settle instead of shooting off
         0,
+        0,
+        0.0f, // useShells, useRain, wind
     },
-    // ---- 2: galaxy -- warm orange core + two cool arms, wound by swirl into a spinning disk ----
+    // ---- 3: galaxy -- warm orange core + two cool arms, wound by swirl into a spinning disk ----
     // The orange source sits AT the origin (0,0): swirl/nbody are both centered there, so a
     // particle at r=0 feels no sideways push and stays put -> a tight bright nucleus. The two
     // blue sources are offset (x = +/-0.5), so swirl winds them into two spiral arms. gravity 0 keeps
@@ -77,25 +104,31 @@ static const Preset presets[] = {
         1.2f,     // swirl          -- orbital spin; winds the two offset arms into spirals
         1.0f,     // damping        -- 1.0 = frictionless, so orbits stay stable & long-lived
         0,
+        0,
+        0,
     },
-    // ---- 3: Jia -- two diagonal jets (pink + gold) bent into arms by a gentle swirl ----
-    // Each source fires a directional fan (spread = 1.8 rad, ~103 deg) aimed diagonally,
-    // so here the angle field DOES steer the stream (unlike the full-circle presets above).
-    // Placed on opposite corners (upper-left / lower-right); the +swirl vortex curves the
-    // two jets so the pink and gold streams wind around the center instead of flying off.
+    // ---- 4: rain -- a full-width falling curtain that puddles on the floor (useRain=1). ----
+    // update_kernel spawns each drop via spawn_rain (random x, depth-scaled downward speed),
+    // so only the FIRST emitter row is read here -- just for the drop's base COLOR (r,g,b). Its
+    // x/y/angle/speed AND the life column are ignored: spawn_rain sets position, per-drop speed,
+    // brightness and a huge life sentinel itself. The physics knobs still apply: gravity pulls
+    // drops down, swirl/nbody off. A drop falls, LANDS on the floor and lingers as a puddle for
+    // a few seconds, then respawns up top -> an endless curtain.
     {
         {
-            //  x     y     angle    spread  baseSpd  r    g     b     life
-            {-0.6f, 0.8f, -0.785f, 1.8f, 0.2f, 1.0f, 0.71f, 0.76f, 8.0f}, // light pink, upper-left
-            {0.6f, -0.8f, 2.356f, 1.8f, 0.2f, 1.0f, 0.84f, 0.0f, 8.0f},   // gold, lower-right
+            //  x      y     angle    spread baseSpd  r    g    b    life
+            {-0.8f, 0.95f, -1.5708f, 0.15f, 0.25f, 0.15f, 0.55f, 0.62f, 2.5f}, // -1.5708 = -pi/2 -> straight down
         },
-        2,        // numEmitters
-        0.0f,     // gravity        -- 0: keep the spiral round, not squashed downward
-        0.00002f, // nbodyStrength  -- a light inward leash so the arms don't fly to the walls
-        0.62f,    // swirl          -- gentle counter-clockwise vortex braids the two colors
-        0.99962f, // damping        -- very light drag keeps the braided jets tight
-        0,
-    }};
+        1,     // numEmitters
+        0.7f,  // gravity       -- positive: accelerate the drops downward
+        0.0f,  // nbodyStrength -- off: no center attraction
+        0.0f,  // swirl         -- off: rain doesn't spin
+        0.99f, // damping       -- light drag so drops keep speeding up (never 0 = would freeze them)
+        0,     // useShells     -- continuous model, no shell burst
+        1,
+        0.3,
+    },
+};
 
 static const int numPresets = sizeof(presets) / sizeof(presets[0]);
 
@@ -105,7 +138,7 @@ static const int numPresets = sizeof(presets) / sizeof(presets[0]);
 // Clamp i into range, then (1) re-upload that preset's emitter table into
 // __constant__ memory via upload_emitter (which also sets params_.numEmitters),
 // and (2) copy its physics knobs (gravity/nbodyStrength/swirl/damping) + the
-// useShells mode flag (L6-2) into params_ so the next update_kernel
+// useShells / useRain mode flags into params_ so the next update_kernel
 // launch uses them. Cheap: no realloc, no init_kernel -- the 1M particles already
 // alive keep flying and only adopt the new look as they recycle, so a switch
 // fades in over roughly one lifetime (a feature, not a bug).
@@ -130,6 +163,8 @@ void ParticleSystem::set_preset(int i)
     params_.swirl = pr.swirl;
     params_.damping = pr.damping;
     params_.useShells = pr.useShells;
+    params_.useRain = pr.useRain;
+    params_.wind = pr.wind;
 }
 
 // A small palette of saturated firework colors; advance_shells picks one per burst.
@@ -166,6 +201,32 @@ __device__ inline void spawn_burst(ParticleSoA p, int i, Shell sh, curandState *
     p.cg[i] = sh.cg;
     p.cb[i] = sh.cb;
     p.life[i] = sh.timer; // life = shell's remaining burst time -> fades with the shell
+}
+
+// ===========================================================================
+// spawn_rain  --  born particle i as a raindrop.  (useRain)
+// ===========================================================================
+// The rain-mode counterpart of spawn(): a drop is born at a RANDOM x across the
+// full width, up at the top of the screen (y = 1). A random `depth` (0 far, 1 near)
+// fakes parallax: near drops fall FASTER and are BRIGHTER, far ones slower/dimmer --
+// vy and the color's brightness both derive from that one draw. The base hue comes
+// from d_emitters[0] (the single rain emitter row), so it stays data-driven. life is
+// set to a HUGE sentinel here so the fall never times out -- the drop is instead
+// recycled by update_kernel when it LANDS on the floor and finishes its puddle dwell.
+// ===========================================================================
+__device__ inline void spawn_rain(ParticleSoA p, int i,
+                                  curandState *st)
+{
+    p.x[i] = (curand_uniform(st) - 0.5f) * 2.0f;
+    p.y[i] = 1.0f;
+    p.vx[i] = 0.0f;
+    float depth = curand_uniform(st);
+    p.vy[i] = -(0.6f + 1.8f * depth);
+    float b = 0.4f + 0.6f * depth;
+    p.cr[i] = d_emitters[0].r * b;
+    p.cg[i] = d_emitters[0].g * b;
+    p.cb[i] = d_emitters[0].b * b;
+    p.life[i] = 999.9f;
 }
 
 // ===========================================================================
@@ -330,12 +391,13 @@ __global__ void init_kernel(ParticleSoA p, int n, int numEmitters, curandState *
 // ===========================================================================
 // update_kernel  --  advance one particle AND write its vertex.  (every frame)
 // ===========================================================================
-// One GPU thread per particle: sum three forces (gravity + central attractor +
-// swirl) into an acceleration, integrate velocity, apply air drag (L6-1), move
+// One GPU thread per particle: sum four forces (gravity + central attractor +
+// swirl + wind) into an acceleration, integrate velocity, apply air drag (L6-1), move
 // the position, bounce off the 4 walls, then age/respawn -- which now BRANCHES on
 // params.useShells (L6-2): shell presets (fireworks) respawn a particle only when
 // its shell relaunches (shell.launch) and hide it while its shell is dark; other
-// presets keep the L5 continuous model (respawn the moment life hits 0). Finally
+// presets keep the L5 continuous model (respawn the moment life hits 0), where
+// useRain further picks spawn_rain (random x at the top) over spawn (emitter). Finally
 // (L2 interop) it packs [x,y,r,g,b] straight into the OpenGL VBO via `vbo` (or, for
 // a dark shell, writes the vertex off-screen so GL clips it). No copy to the CPU.
 // params is passed BY VALUE (a copy per thread) -- use params.gravity (dot),
@@ -378,6 +440,12 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
     ax -= py * params.swirl;
     ay += px * params.swirl;
 
+    // 4) Wind (rain slant): a constant horizontal push. 0 for every non-rain preset,
+    //    so no useRain guard is needed -- adding 0 is a no-op. It's an ACCELERATION
+    //    (not a one-off initial velocity), so drag can't erase it: drops settle into a
+    //    slanted terminal fall instead of drifting straight again.
+    ax += params.wind;
+
     // --- Integrate (semi-implicit Euler) --------------------------------------
     // Velocity first, THEN use the NEW velocity to move the position. This
     // ordering (not position-first) keeps orbits stable, which swirl needs.
@@ -397,27 +465,56 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
     p.x[i] += p.vx[i] * dt; // x += v*dt   (velocity changes position)
     p.y[i] += p.vy[i] * dt;
 
-    // Bounce off each of the 4 walls: clamp to the wall, flip velocity, scale by
-    // restitution (energy kept per bounce). Clamp value must match the wall tested.
-    if (p.x[i] > params.bound)
+    // How a particle meets the world edge now depends on the mode:
+    //  - non-rain: bounce off all 4 walls -- clamp to the wall, flip velocity, keep
+    //    `restitution` of the speed (clamp value must match the wall tested).
+    //  - rain: no bounce. When a drop reaches the FLOOR it lands and stays there as a
+    //    puddle (pinned, velocity zeroed) until it respawns up top. See the else below.
+    if (!params.useRain)
     {
-        p.x[i] = params.bound;
-        p.vx[i] = -p.vx[i] * params.restitution;
+        if (p.x[i] > params.bound)
+        {
+            p.x[i] = params.bound;
+            p.vx[i] = -p.vx[i] * params.restitution;
+        }
+        if (p.x[i] < -params.bound)
+        {
+            p.x[i] = -params.bound;
+            p.vx[i] = -p.vx[i] * params.restitution;
+        }
+        if (p.y[i] > params.bound)
+        {
+            p.y[i] = params.bound;
+            p.vy[i] = -p.vy[i] * params.restitution;
+        }
+        if (p.y[i] < -params.bound)
+        {
+            p.y[i] = -params.bound;
+            p.vy[i] = -p.vy[i] * params.restitution;
+        }
     }
-    if (p.x[i] < -params.bound)
+    else // rain: land on the floor and puddle instead of bouncing
     {
-        p.x[i] = -params.bound;
-        p.vx[i] = -p.vx[i] * params.restitution;
-    }
-    if (p.y[i] > params.bound)
-    {
-        p.y[i] = params.bound;
-        p.vy[i] = -p.vy[i] * params.restitution;
-    }
-    if (p.y[i] < -params.bound)
-    {
-        p.y[i] = -params.bound;
-        p.vy[i] = -p.vy[i] * params.restitution;
+        if (p.y[i] < -params.bound) // reached the floor -> pin the drop as a puddle
+        {
+            // Pin to the floor EVERY frame: gravity re-pulls the drop under the bound
+            // each step, so re-clamping here holds it flat instead of letting it sink.
+            p.y[i] = -params.bound;
+            p.vx[i] = 0.0f;
+            p.vy[i] = 0.0f;
+
+            // The landing itself happens only ONCE. While falling, life is a huge
+            // sentinel (set by spawn_rain), so life > t is true only on the FIRST frame
+            // on the floor: start the puddle's dwell countdown (life = t) and give the
+            // drop a tiny one-time horizontal splash. On later puddle frames life <= t,
+            // so this block is skipped and the drop just sits (aging in the branch below).
+            float t = 3.0f; // puddle dwell: seconds a drop lingers before it respawns
+            if (p.life[i] > t)
+            {
+                p.life[i] = t;
+                p.x[i] += (curand_uniform(&rng[i]) - 0.5) * 0.05f;
+            }
+        }
     }
 
     // --- Age / respawn: two models, chosen per preset (L6-2) ------------------
@@ -435,7 +532,17 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
         p.life[i] -= dt;
         if (p.life[i] <= 0.0f)
         {
-            spawn(p, i, params.numEmitters, &rng[i]);
+            // Same aging/gate for both looks; only the birth recipe differs:
+            // rain drops are reborn at a random x up top (spawn_rain), everything
+            // else at its emitter mouth (spawn).
+            if (params.useRain)
+            {
+                spawn_rain(p, i, &rng[i]);
+            }
+            else
+            {
+                spawn(p, i, params.numEmitters, &rng[i]);
+            }
         }
     }
 
@@ -507,10 +614,10 @@ ParticleSystem::ParticleSystem(const SimParams &p) // definition of the ctor dec
     CUDA_CHECK(cudaMalloc(&d_shells_, (size_t)params_.numShells * sizeof(Shell)));
     CUDA_CHECK(cudaMalloc(&d_shell_rng_, (size_t)params_.numShells * sizeof(curandState)));
 
-    // Boot the default look (preset 0). set_preset uploads its emitter table into
-    // __constant__ memory and sets params_.numEmitters -- so it MUST run before
+    // Boot the default look (preset 1, fireworks). set_preset uploads its emitter table
+    // into __constant__ memory and sets params_.numEmitters -- so it MUST run before
     // init_kernel below, which reads both to build the initial 1M population.
-    set_preset(0);
+    set_preset(1);
     int block = 256, grid = (n_ + block - 1) / block;
     init_rng<<<grid, block>>>((curandState *)d_rng_, n_, 1025ULL);
     CUDA_CHECK(cudaGetLastError());

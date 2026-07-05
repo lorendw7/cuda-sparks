@@ -165,13 +165,14 @@ not just the plumbing. Build these in order, testing each before the next:
 uploaded via `upload_emitter()` / `cudaMemcpyToSymbol` (added `SimParams.numEmitters`).
 `spawn()` births particle `i` from emitter `i % numEmitters`: polar `(angle ± spread,
 baseSpeed)` → Cartesian velocity, emitter position/colour, staggered lifetime so the
-stream is continuous, not pulsed. `update_kernel` sums three named forces —
-`gravity` / central attractor (`nbodyStrength`) / `swirl` — into an `(ax, ay)`
-accumulator, then integrates with semi-implicit Euler. A `Preset` table (fireworks /
-fire / galaxy / Jia) bundles an emitter table with those physics knobs; `set_preset(i)`
-clamps, re-uploads the emitters, and copies the knobs into `params_`. The constructor
-boots preset 0 and number keys **1 / 2 / 3 / 4** switch live (the look fades in over ~1
-lifetime as particles recycle). **Step 5 DONE** — two original presets designed from
+stream is continuous, not pulsed. `update_kernel` sums four named forces —
+`gravity` / central attractor (`nbodyStrength`) / `swirl` / `wind` — into an `(ax, ay)`
+accumulator, then integrates with semi-implicit Euler. A `Preset` table (Jia /
+fireworks / fire / galaxy / rain) bundles an emitter table with those physics knobs;
+`set_preset(i)` clamps, re-uploads the emitters, and copies the knobs into `params_`. The
+constructor boots preset 1 (fireworks) and hotkeys **J** (Jia) / **1 / 2 / 3 / 4**
+(fireworks / fire / galaxy / rain) switch live — `GLFW_KEY_*` is the physical key, so J is
+case-insensitive (the look fades in over ~1 lifetime as particles recycle). **Step 5 DONE** — two original presets designed from
 scratch: **galaxy** (an orange nucleus parked at the origin, where the swirl/nbody forces
 vanish so it stays tight, plus two offset blue arms the vortex winds into spirals) and
 **Jia** (two point-symmetric pink + gold jets braided by a gentle swirl). Default particle
@@ -295,6 +296,37 @@ looking procedural and starts looking real.
 > Presentation track's input handling (see PRESENTATION.md), or do it as a one-line
 > cleanup before then.
 
+**Visual polish — firework shapes, color & effects (planned, fireworks branch of L6):**
+
+The whole point after "it bursts" is to make it *beautiful and varied*. Three tracks,
+all small additions on top of the working shell system:
+
+1. **Burst shapes** — the shape is set *entirely* by `spawn_burst`'s initial-velocity
+   distribution (today: random full-circle direction + random speed `0..0.8` = a filled
+   disk). Add an `int type` to `Shell`, picked at random on relaunch (like the color),
+   and branch `spawn_burst` on it. Menu by difficulty:
+   - ⭐ **ring / sphere** — fixed speed (drop the `0..max` randomness) → all sparks share
+     one radius = a hollow expanding ring.
+   - ⭐⭐ **star / petals** — speed modulated by angle, `s = base*(1 + 0.3*cos(5*a))` → spikes.
+   - ⭐⭐ **willow** — low speed + strong gravity + long life → rise then droop.
+   - ⭐⭐ **double-ring / layered** — split by `i` into inner-slow / outer-fast groups, a
+     different color per layer.
+   - ⭐⭐⭐ **heart / letter / arbitrary pattern** — use `i` as a parameter into a shape
+     equation and aim the velocity along it.
+   - ⭐⭐⭐ **rising tail** — add a "rising" shell state (rocket climbs + trails) that only
+     explodes at apex.
+2. **Color** — beyond one palette hue per burst: **color-over-life** (add an end-color,
+   lerp birth→ember by life fraction: white→hue→dark red = the classic cooling spark;
+   shared with the Phase-A2 optimization idea), per-layer colors, brighter/HDR palette
+   for additive blend.
+3. **Visual-effect optimization** — point **size-by-life** (twinkle: big-bright when young,
+   small-dim when dying), per-particle size jitter, a brightness-over-life curve, glow,
+   and the additive-blend-at-high-density revisit (see anti-chaos above). Preset struct
+   grows a few fields (`colorEnd`, size params); small refactor.
+
+Recommended first shape lesson: **hollow ring + per-burst random `Shell.type`** — tiny
+change, big visual gain, and it teaches "one field drives many behaviors."
+
 ### L7 — Precision & bandwidth *(optional / stretch)*
 
 Turns L4's *diagnosis* ("the wall is total bytes moved") into a *measured result*. Do
@@ -389,6 +421,14 @@ tracks.)*
       preset 0). Step 5 — two original presets: **galaxy** (origin nucleus + two
       swirl-wound arms) and **Jia** (symmetric pink/gold braided jets). Default count 30k.
 - [ ] L6 Realistic simulation & randomness (episodic shell bursts, per-style physics, full per-particle RNG)
+  - [x] L6 **rain** preset (key **4**) — a data-driven `useRain` mode. `spawn_rain` births
+        drops at a random x across the top; a per-drop `depth` fakes parallax (near drops fall
+        faster **and** brighter, far ones slower/dimmer — both derived from one RNG draw). Drops
+        **land and linger as a puddle**: a large `life` sentinel doubles as a "still falling" flag
+        vs. a short puddle-dwell countdown, so the 3-state cycle (fall → puddle → respawn) needs
+        no extra per-particle field. A `wind` knob adds slant (a constant horizontal accel; 0 for
+        every non-rain preset, so it needs no branch). Hue reads from the one rain emitter row —
+        data-driven, so the sea-water color is just data.
 - [ ] L7 Precision & bandwidth *(optional)* — FP16/`__half2` on tolerant fields, re-run L4 Nsight to confirm "fewer bytes ≈ less time"
 
 ### Application tracks (layered on the finished sim — separate docs)

@@ -1,6 +1,7 @@
 // Phase 4 (L2-L5) -- window + GL context, then run the 1M-particle sim each frame.
 // CUDA-GL interop: the kernel writes vertices straight into the VBO (no CPU round
-// trip). Number keys 1/2/3/4 switch effect presets (fireworks / fire / galaxy / Jia).
+// trip). Hotkeys switch effect presets: J = Jia (default), 1 = fireworks, 2 = fire,
+// 3 = galaxy, 4 = rain.
 // SPARKS_MAX_FRAMES caps the loop so Nsight application-replay can profile it.
 // glad must be included before glfw.
 #include <glad/gl.h>
@@ -125,28 +126,34 @@ int main()
             glfwSwapBuffers(window); // present the frame
             glfwPollEvents();        // handle close/keyboard events
 
-            // Number keys switch the effect preset live. glfwGetKey reads the
-            // current key state (already refreshed by glfwPollEvents above); a press
-            // re-uploads that preset's emitters + physics. Existing particles adopt
-            // the new look only as they recycle, so it fades in over ~1 lifetime.
+            // Hotkeys switch the effect preset live. glfwGetKey reads the current key
+            // state (already refreshed by glfwPollEvents above); a press re-uploads that
+            // preset's emitters + physics. Existing particles adopt the new look only as
+            // they recycle, so it fades in over ~1 lifetime. GLFW_KEY_* is the PHYSICAL
+            // key, independent of Shift / Caps Lock -- so J is naturally case-insensitive.
+            if (glfwGetKey(window, GLFW_KEY_J) == GLFW_PRESS)
+            {
+                sim.set_preset(0); // Jia
+            }
+
             if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS)
             {
-                sim.set_preset(0); // fireworks
+                sim.set_preset(1); // fireworks
             }
 
             if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS)
             {
-                sim.set_preset(1); // fire
+                sim.set_preset(2); // fire
             }
 
             if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS)
             {
-                sim.set_preset(2); // galaxy
+                sim.set_preset(3); // galaxy
             }
 
             if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS)
             {
-                sim.set_preset(3); // Jia
+                sim.set_preset(4); // rain
             }
 
             if (maxFrames > 0 && ++frameCount >= maxFrames)
