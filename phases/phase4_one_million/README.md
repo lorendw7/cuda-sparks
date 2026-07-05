@@ -429,6 +429,18 @@ tracks.)*
         no extra per-particle field. A `wind` knob adds slant (a constant horizontal accel; 0 for
         every non-rain preset, so it needs no branch). Hue reads from the one rain emitter row —
         data-driven, so the sea-water color is just data.
+  - [x] L6 **smoke** preset (key **5**) — a buoyant, turbulent plume from one narrow bottom
+        vent. Adds a `turbulence` knob (last field of `Preset`/`SimParams`, so the other five
+        presets zero-fill it automatically). A new force in `update_kernel` gives each particle
+        a fresh **random horizontal kick** every frame; integrated into `vx` it makes the sideways
+        velocity a **random walk / Brownian motion**, so the rising column widens and curls into a
+        diffusing plume. Buoyancy (negative gravity) drives the rise; light drag sets a terminal
+        velocity that, over the 8 s life, carries the plume to the **top wall — where the non-rain
+        bounce path makes it pool under a "ceiling"** (a kept happy accident). The kick is scaled by
+        **`/ sqrtf(dt)`** so the diffusion rate is **frame-rate-independent**: a random walk's spread
+        grows as √(steps), and over a fixed second there are `1/dt` steps of size ~`dt`, so a constant
+        coefficient would give spread ~√dt (less diffusion at higher FPS) — the same class of bug the
+        `dt` clamp and `powf(damping, dt*60)` drag already fixed elsewhere.
 - [ ] L7 Precision & bandwidth *(optional)* — FP16/`__half2` on tolerant fields, re-run L4 Nsight to confirm "fewer bytes ≈ less time"
 
 ### Application tracks (layered on the finished sim — separate docs)
@@ -437,3 +449,32 @@ tracks.)*
       manual toggle, fullscreen square viewport + telemetry HUD, Dear ImGui menu). After L6.
 - [ ] Audio — see **[AUDIO.md](AUDIO.md)** (procedural event SFX → ambient beds →
       audio-reactive). After Presentation. (Was "Phase 5" in the roadmap.)
+
+### Per-style advanced polish (OPTIONAL — LAST, after Presentation & Audio)
+
+The looks are "good enough" once L6 is done; these are the *final, optional* per-style
+refinements, deliberately parked until the app shell (Presentation) and Audio tracks ship.
+Several depend on one enabling renderer feature, so build that first if you pick them up:
+
+- [ ] **Shared renderer upgrades** (unlock several items below):
+  - Per-vertex point **size** — add a `size` attribute to the VBO + `gl_PointSize = size`
+    in the vertex shader. Unlocks rain near-big/far-small, twinkle, size-by-life.
+  - **Streak / motion-blur** rendering — draw fast particles as short lines / trails.
+  - **Additive blend** revisited at high density (was reverted at low count for haze).
+- [ ] **Fireworks** — burst **SHAPES** via `spawn_burst`'s velocity distribution + a random
+  `Shell.type`: hollow ring/sphere (fixed speed), star/petals (`s=base*(1+k*cos(mθ))`),
+  willow/垂柳 (low speed + gravity droop + long life), double-ring (split `i` into layers),
+  heart/letter (`i` → shape equation), rising-tail rocket (climb, explode at apex). Plus
+  secondary "cracker" bursts (a dying spark spawns children) and color-over-life (bright→ember).
+- [ ] **Fire** — curl-noise turbulence (smooth field, not white noise), color cooling
+  white→orange→red→smoke over life, flicker, smoke hand-off at the top.
+- [ ] **Galaxy** — orbit radius/phase jitter, color by radius (hot core / cool arms),
+  disk confinement, dust lanes.
+- [ ] **Rain** — **near-big/far-small** (point size by `depth`, needs per-vertex size),
+  velocity **streaks**, puddle-dwell jitter + landing ripples, gusting (time-varying) wind,
+  splash-up droplets on landing, depth fog.
+- [ ] **Smoke** — denser curl-noise turbulence, grow+fade curve tuning, buoyancy variation,
+  light/dark shading by local density.
+- [ ] **Curl-Noise flow field** — color by velocity direction/magnitude, multi-octave noise,
+  faster field evolution.
+- [ ] **Strange Attractor** — color by speed/position, trail persistence, multiple attractors.

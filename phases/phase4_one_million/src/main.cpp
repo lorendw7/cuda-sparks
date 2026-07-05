@@ -1,7 +1,7 @@
 // Phase 4 (L2-L5) -- window + GL context, then run the 1M-particle sim each frame.
 // CUDA-GL interop: the kernel writes vertices straight into the VBO (no CPU round
 // trip). Hotkeys switch effect presets: J = Jia (default), 1 = fireworks, 2 = fire,
-// 3 = galaxy, 4 = rain.
+// 3 = galaxy, 4 = rain, 5 = smoke.
 // SPARKS_MAX_FRAMES caps the loop so Nsight application-replay can profile it.
 // glad must be included before glfw.
 #include <glad/gl.h>
@@ -154,6 +154,11 @@ int main()
             if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS)
             {
                 sim.set_preset(4); // rain
+            }
+
+            if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS)
+            {
+                sim.set_preset(5); // smoke
             }
 
             if (maxFrames > 0 && ++frameCount >= maxFrames)

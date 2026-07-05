@@ -36,6 +36,7 @@ struct SimParams {
     int numShells;
     int useShells, useRain;
     float wind;         // constant horizontal wind acceleration (rain slant); 0 = off
+    float turbulence;
 };
 
 // ---------------------------------------------------------------------------
@@ -68,4 +69,5 @@ struct Preset
                           // preset -- an omitted (0) value freezes every particle instantly.
     int useShells, useRain;
     float wind;           // copied into SimParams by set_preset(); 0 for non-rain presets
+    float turbulence;
 };

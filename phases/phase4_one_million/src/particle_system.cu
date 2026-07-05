@@ -15,8 +15,9 @@ __constant__ Emitter d_emitters[MAX_EMITTERS];
 // with the physics knobs (gravity / nbodyStrength / swirl / damping) that shape it.
 // ===========================================================================
 // Field order matches the struct: { emitters[MAX_EMITTERS], numEmitters, gravity,
-// nbodyStrength, swirl, damping, useShells, useRain, wind }. damping (L6-1) is air drag: v *= damping each
-// step -- 1.0 frictionless, <1 decelerates. Only the first numEmitters rows are used; the rest are
+// nbodyStrength, swirl, damping, useShells, useRain, wind, turbulence }. damping (L6-1) is air drag:
+// v *= damping each step -- 1.0 frictionless, <1 decelerates. turbulence is smoke's random-walk kick
+// (0 for every other preset). Only the first numEmitters rows are used; the rest are
 // zero-filled by the aggregate initializer and never uploaded. Add/remove a whole
 // Preset here and numPresets (below) + the number keys in main.cpp pick it up.
 //   0 Jia       -- two diagonal jets (pink + gold), gentle swirl curves them into
@@ -27,6 +28,8 @@ __constant__ Emitter d_emitters[MAX_EMITTERS];
 //   4 rain      -- drops spawn at a random x across the top and fall under gravity,
 //                  land and linger on the floor as a puddle, then respawn up top
 //                  (useRain + spawn_rain -> a full-width curtain with a wet floor)
+//   5 smoke     -- one narrow upward vent; buoyancy lifts it, turbulence random-walks
+//                  it sideways into a widening plume that bounces under the top wall
 // ===========================================================================
 static const Preset presets[] = {
     // ---- 0: Jia -- two diagonal jets (pink + gold) bent into arms by a gentle swirl ----
@@ -48,6 +51,7 @@ static const Preset presets[] = {
         0,
         0,
         0.0f, // useShells, useRain, wind
+        0.0f,
     },
     // ---- 1: fireworks -- 3 full-circle bursts, fast launch, slight swirl, fall under gravity ----
     {
@@ -69,6 +73,7 @@ static const Preset presets[] = {
         1,
         0,
         0.0f, // useShells, useRain, wind
+        0.0f,
     },
     // ---- 2: fire -- 3 narrow upward jets along the bottom, buoyant (negative gravity), warm ----
     {
@@ -85,6 +90,7 @@ static const Preset presets[] = {
         0,
         0,
         0.0f, // useShells, useRain, wind
+        0.0f,
     },
     // ---- 3: galaxy -- warm orange core + two cool arms, wound by swirl into a spinning disk ----
     // The orange source sits AT the origin (0,0): swirl/nbody are both centered there, so a
@@ -105,7 +111,8 @@ static const Preset presets[] = {
         1.0f,     // damping        -- 1.0 = frictionless, so orbits stay stable & long-lived
         0,
         0,
-        0,
+        0.0f,
+        0.0f,
     },
     // ---- 4: rain -- a full-width falling curtain that puddles on the floor (useRain=1). ----
     // update_kernel spawns each drop via spawn_rain (random x, depth-scaled downward speed),
@@ -127,8 +134,34 @@ static const Preset presets[] = {
         0,     // useShells     -- continuous model, no shell burst
         1,
         0.3,
+        0.0f,
     },
-};
+    // ---- 5: smoke -- one narrow upward vent, buoyant rise + turbulent diffusion. ----
+    // A single bottom-center emitter aims a slow, gray, long-lived stream straight up
+    // (1.5708 = pi/2). Negative gravity is BUOYANCY (gentler than fire): the column
+    // drifts upward. The turbulence knob adds a per-frame random horizontal kick, so
+    // the rising velocity does a random walk -> the plume widens and curls as it climbs
+    // (see force 5 in update_kernel). climb ~ (buoyancy/drag) * life: buoyancy -0.20 +
+    // light damping 0.996 give a fast enough terminal rise that over its 8 s life the
+    // plume reaches the TOP wall and, since this is the non-rain path, BOUNCES and pools
+    // under it -- reading as smoke hitting a ceiling (a happy accident we kept). Tune it
+    // DOWN (weaker gravity / stronger damping / shorter life) if you want it to fade in
+    // open air instead. swirl/nbody/wind off, continuous model (useShells/useRain both 0).
+    {
+        {
+            //  x     y     angle    spread baseSpd  r     g     b    life
+            {0.0f, -0.7f, 1.5708f, 0.35f, 0.25f, 0.55f, 0.55f, 0.6f, 8.0f}, // slow gray upward vent
+        },
+        1,       // numEmitters
+        -0.20f,  // gravity       -- negative: gentle buoyant rise (softer than fire's -0.5)
+        0.0f,    // nbodyStrength -- off
+        0.0f,    // swirl         -- off
+        0.996f,  // damping       -- light drag: the plume slows as it rises
+        0,       // useShells     -- continuous model
+        0,       // useRain
+        0.0f,    // wind          -- off (add a touch for a leaning column)
+        0.3f,    // turbulence    -- random horizontal walk -> widening, curling diffusion
+    }};
 
 static const int numPresets = sizeof(presets) / sizeof(presets[0]);
 
@@ -165,6 +198,7 @@ void ParticleSystem::set_preset(int i)
     params_.useShells = pr.useShells;
     params_.useRain = pr.useRain;
     params_.wind = pr.wind;
+    params_.turbulence = pr.turbulence;
 }
 
 // A small palette of saturated firework colors; advance_shells picks one per burst.
@@ -445,6 +479,25 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
     //    (not a one-off initial velocity), so drag can't erase it: drops settle into a
     //    slanted terminal fall instead of drifting straight again.
     ax += params.wind;
+
+    // 5) Turbulence (smoke): a fresh random HORIZONTAL kick every frame. Each frame
+    //    draws (curand_uniform - 0.5) in [-0.5,0.5) -> a symmetric +/- push (mean 0,
+    //    unlike wind's fixed direction), scaled by turbulence. 0 for every non-smoke
+    //    preset, so like wind it needs no branch -- adding 0 is a no-op. Integrated
+    //    into vx below, these independent kicks make the horizontal velocity a RANDOM
+    //    WALK (Brownian motion): no preferred direction, but the sideways SPREAD grows
+    //    ~sqrt(time), so the rising column widens and curls into a diffusing plume
+    //    instead of a straight jet. Drag (below) keeps the walk from running away.
+    //    Draws from this particle's OWN curandState, so no two smoke trails wander
+    //    alike. Only ax here -- buoyancy (negative gravity) already owns the rise.
+    //    Frame-rate independence (the `/ sqrtf(dt)`): a random walk's spread grows as
+    //    sqrt(number of steps). Over a fixed second there are 1/dt steps each of size
+    //    ~dt, so a CONSTANT coefficient gives spread ~ sqrt(1/dt)*dt = sqrt(dt) -> LESS
+    //    diffusion at higher FPS (same class of bug as raw dt or a raw v*=damping).
+    //    Dividing by sqrtf(dt) makes each kick ~sqrt(dt), cancelling it so the spread
+    //    tracks sqrt(time) only -- identical diffusion at any frame rate. (dt is the
+    //    real frame time, clamped to (0, 0.05] upstream, so it is never zero here.)
+    ax += (curand_uniform(&rng[i]) - 0.5f) * params.turbulence / sqrtf(dt);
 
     // --- Integrate (semi-implicit Euler) --------------------------------------
     // Velocity first, THEN use the NEW velocity to move the position. This
