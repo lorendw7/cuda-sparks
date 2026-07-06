@@ -15,7 +15,7 @@ __constant__ Emitter d_emitters[MAX_EMITTERS];
 // with the physics knobs (gravity / nbodyStrength / swirl / damping) that shape it.
 // ===========================================================================
 // Field order matches the struct: { emitters[MAX_EMITTERS], numEmitters, gravity,
-// nbodyStrength, swirl, damping, useShells, useRain, useFlow, wind, turbulence, curl }. damping (L6-1)
+// nbodyStrength, swirl, damping, useShells, useRain, useFlow, wind, turbulence, curl, useAttractor }. damping (L6-1)
 // is air drag: v *= damping each step -- 1.0 frictionless, <1 decelerates. turbulence is smoke's
 // random-walk kick; curl (L6) is the curl-noise flow-field strength -- both 0 for every other preset. Only the first numEmitters rows are used; the rest are
 // zero-filled by the aggregate initializer and never uploaded. Add/remove a whole
@@ -32,6 +32,9 @@ __constant__ Emitter d_emitters[MAX_EMITTERS];
 //                  it sideways into a widening plume that bounces under the top wall
 //   6 curl-noise-- particles seeded across the whole screen (spawn_scatter, useFlow),
 //                  advected by a smooth divergence-free curl-noise flow field (curl>0)
+//   7 attractor -- Lorenz strange attractor (useAttractor). A velocity-field, not a
+//                  force model: (x,y,z) hold the 3D Lorenz state, update_kernel reads
+//                  velocity straight from the ODE and projects (x,z) -> twin butterfly wings
 // ===========================================================================
 static const Preset presets[] = {
     // ---- 0: Jia -- two diagonal jets (pink + gold) bent into arms by a gentle swirl ----
@@ -56,6 +59,7 @@ static const Preset presets[] = {
         0.0f,     // wind
         0.0f,     // turbulence
         0.0f,     // curl           -- flow field off
+        0,        // useAttractor   -- Lorenz off
     },
     // ---- 1: fireworks -- 3 full-circle bursts, fast launch, slight swirl, fall under gravity ----
     {
@@ -80,6 +84,7 @@ static const Preset presets[] = {
         0.0f,      // wind
         0.0f,      // turbulence
         0.0f,      // curl           -- flow field off
+        0,         // useAttractor   -- Lorenz off
     },
     // ---- 2: fire -- 3 narrow upward jets along the bottom, buoyant (negative gravity), warm ----
     {
@@ -99,6 +104,7 @@ static const Preset presets[] = {
         0.0f,  // wind
         0.0f,  // turbulence
         0.0f,  // curl           -- flow field off
+        0,     // useAttractor  -- Lorenz off
     },
     // ---- 3: galaxy -- warm orange core + two cool arms, wound by swirl into a spinning disk ----
     // The orange source sits AT the origin (0,0): swirl/nbody are both centered there, so a
@@ -123,6 +129,7 @@ static const Preset presets[] = {
         0.0f,     // wind
         0.0f,     // turbulence
         0.0f,     // curl           -- flow field off
+        0,        // useAttractor   -- Lorenz off
     },
     // ---- 4: rain -- a full-width falling curtain that puddles on the floor (useRain=1). ----
     // update_kernel spawns each drop via spawn_rain (random x, depth-scaled downward speed),
@@ -147,6 +154,7 @@ static const Preset presets[] = {
         0.3,   // wind
         0.0f,  // turbulence
         0.0f,  // curl          -- flow field off
+        0,     // useAttractor  -- Lorenz off
     },
     // ---- 5: smoke -- one narrow upward vent, buoyant rise + turbulent diffusion. ----
     // A single bottom-center emitter aims a slow, gray, long-lived stream straight up
@@ -175,6 +183,7 @@ static const Preset presets[] = {
         0.0f,   // wind          -- off (add a touch for a leaning column)
         0.3f,   // turbulence    -- random horizontal walk -> widening, curling diffusion
         0.0f,   // curl          -- flow field off (smoke uses white-noise turbulence, not a coherent field)
+        0,      // useAttractor  -- Lorenz off
     },
     // ---- 6: curl-noise -- a screen-filling cloud advected by a smooth flow field. ----
     // Particles are seeded EVERYWHERE (spawn_scatter, useFlow=1) so the per-position flow
@@ -202,6 +211,31 @@ static const Preset presets[] = {
         0.0f,  // wind
         0.0f,  // turbulence
         1.2f,  // curl           -- flow-field strength (turns force #6 on)
+        0,     // useAttractor   -- Lorenz off
+    },
+    // ---- 7: strange attractor -- Lorenz butterfly, a VELOCITY-FIELD (not force) model. ----
+    // The particle's (x,y,z) hold the Lorenz STATE, not screen coords. update_kernel's
+    // useAttractor branch reads velocity straight from the Lorenz ODE (lorenz()), integrates
+    // the 3D state, and projects (x,z) to the screen -> the twin butterfly wings. Every force
+    // knob is OFF -- the field alone drives the motion; this preset just flips useAttractor on.
+    // The emitter row is read only for base COLOR + life; spawn_attractor sets the position.
+    {
+        {
+            //  x    y   angle spread baseSpd  r    g    b   life
+            {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.4f, 0.8f, 1.0f, 12.0f}, // scatter seeds ignore pos/aim; row gives color + life
+        },
+        1,     // numEmitters
+        0.0f,  // gravity        -- off (the Lorenz field IS the motion)
+        0.0f,  // nbodyStrength  -- off
+        0.0f,  // swirl          -- off
+        1.0f,  // damping        -- 1.0 frictionless: velocity IS the field, no drag wanted
+        0,     // useShells
+        0,     // useRain
+        0,     // useFlow
+        0.0f,  // wind
+        0.0f,  // turbulence
+        0.0f,  // curl
+        1,     // useAttractor   -- ON: the whole reason this preset exists
     }};
 
 static const int numPresets = sizeof(presets) / sizeof(presets[0]);
@@ -242,6 +276,7 @@ void ParticleSystem::set_preset(int i)
     params_.turbulence = pr.turbulence;
     params_.curl = pr.curl;
     params_.useFlow = pr.useFlow;
+    params_.useAttractor = pr.useAttractor;
 }
 
 // A small palette of saturated firework colors; advance_shells picks one per burst.
@@ -300,6 +335,26 @@ __device__ inline void curl_noise(float x, float y, float t, float *fx, float *f
     *fx = dpsi_dy;                                                           //  along-contour x-component  =  d(psi)/dy
     *fy = -dpsi_dx;                                                          //  along-contour y-component  = -d(psi)/dx  (the 90-degree rotation of the gradient)
 }
+
+// ===========================================================================
+// lorenz  --  the Lorenz strange-attractor VELOCITY field.  (L6 #7, 7a)
+// ===========================================================================
+// A velocity-field model, NOT a force model: this returns the velocity DIRECTLY
+// as a function of the 3D state (x,y,z) -- dp/dt = f(p) -- so update_kernel
+// integrates position in ONE step (x += f*dt), with no acceleration and no
+// stored velocity. Chaotic (the butterfly) at sigma=10, rho=28, beta=8/3; it
+// NEEDS 3 dimensions because a 2D autonomous flow can't be chaotic (its
+// trajectories can't cross, so Poincare-Bendixson traps them onto a limit cycle).
+// Three outputs written back through the dx/dy/dz pointers (same idiom as curl_noise).
+// beta = 8/3, written 2.6667f (NOT 8/3, which is integer division = 2).
+// ===========================================================================
+__device__ inline void lorenz(float x, float y, float z, float *dx, float *dy, float *dz)
+{
+    float sigma = 10.0f, rho = 28.0f, beta = 2.6667f;
+    *dx = sigma * (y - x);   // x is pulled toward y
+    *dy = x * (rho - z) - y; // z feeds back on y (the xz nonlinearity = chaos source)
+    *dz = x * y - beta * z;  // xy pumps energy in, -beta*z dissipates it
+}
 // ===========================================================================
 // spawn_burst  --  born particle i from a SHELL, not an emitter.  (L6-2)
 // ===========================================================================
@@ -354,6 +409,29 @@ __device__ inline void spawn_scatter(ParticleSoA p, int i, curandState *st)
 {
     p.x[i] = (curand_uniform(st) - 0.5f) * 2.0f;
     p.y[i] = (curand_uniform(st) - 0.5f) * 2.0f;
+    p.vx[i] = 0.0f;
+    p.vy[i] = 0.0f;
+    p.cr[i] = d_emitters[0].r;
+    p.cb[i] = d_emitters[0].b;
+    p.cg[i] = d_emitters[0].g;
+    p.life[i] = d_emitters[0].lifetime * (0.7f + 0.3f * curand_uniform(st));
+}
+
+// ===========================================================================
+// spawn_attractor  --  seed particle i somewhere in Lorenz STATE space.  (L6 #7)
+// ===========================================================================
+// The attractor counterpart of spawn_scatter(): (x,y,z) here are the 3D Lorenz
+// STATE, not screen coords, so we scatter across the attractor's own range
+// (roughly x,y in +/-20, z in 0..50). Chaos (sensitive dependence) then smears
+// these seeds across the whole butterfly within a second or two. Velocity is
+// left 0 -- it isn't stored state here; update_kernel reads it fresh from
+// lorenz() each frame. Color/life come from the single emitter row, like scatter.
+// ===========================================================================
+__device__ inline void spawn_attractor(ParticleSoA p, int i, curandState *st)
+{
+    p.x[i] = (curand_uniform(st) - 0.5f) * 40.0f;
+    p.y[i] = (curand_uniform(st) - 0.5f) * 40.0f;
+    p.z[i] = curand_uniform(st)  * 50.0f;
     p.vx[i] = 0.0f;
     p.vy[i] = 0.0f;
     p.cr[i] = d_emitters[0].r;
@@ -756,7 +834,7 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
             // hue -> the eddy reads as a rotating color patch. atan2(vy, vx) is the movement
             // angle (-pi..pi); three sines 120 deg apart map it onto a seamless rainbow wheel
             // (R/G/B peak at different angles, so each direction gets its own vivid hue).
-            float ang = atan2f(p.vy[i], p.vx[i]);       // movement direction (note: y first, then x)
+            float ang = atan2f(p.vy[i], p.vx[i]);             // movement direction (note: y first, then x)
             v[2] = (0.5f + 0.5f * sinf(ang)) * fade;          // R
             v[3] = (0.5f + 0.5f * sinf(ang + 2.094f)) * fade; // G, phase +120 deg (2pi/3)
             v[4] = (0.5f + 0.5f * sinf(ang + 4.189f)) * fade; // B, phase +240 deg (4pi/3)
@@ -793,6 +871,7 @@ ParticleSystem::ParticleSystem(const SimParams &p) // definition of the ctor dec
     size_t bytes = (size_t)n_ * sizeof(float); // one field's array = n floats
     CUDA_CHECK(cudaMalloc(&d_.x, bytes));
     CUDA_CHECK(cudaMalloc(&d_.y, bytes));
+    CUDA_CHECK(cudaMalloc(&d_.z, bytes)); // L6 #7: the Lorenz attractor's 3rd coordinate
     CUDA_CHECK(cudaMalloc(&d_.vx, bytes));
     CUDA_CHECK(cudaMalloc(&d_.vy, bytes));
     CUDA_CHECK(cudaMalloc(&d_.life, bytes));
@@ -803,6 +882,13 @@ ParticleSystem::ParticleSystem(const SimParams &p) // definition of the ctor dec
     // L6-2: the shell state array + its own (smaller) RNG pool, one per shell.
     CUDA_CHECK(cudaMalloc(&d_shells_, (size_t)params_.numShells * sizeof(Shell)));
     CUDA_CHECK(cudaMalloc(&d_shell_rng_, (size_t)params_.numShells * sizeof(curandState)));
+    // L6 #7: zero the z array up front. z is only used by the Lorenz attractor, but the
+    // sim boots as fireworks; when the user switches TO attractor, particles still carrying
+    // a positive life from the old look run Lorenz integration before their first respawn.
+    // If z were uninitialized device garbage, that integration could blow up to NaN/inf.
+    // z=0 is a safe Lorenz start (spirals out naturally); spawn_attractor seeds it properly
+    // on respawn. cudaMemset fills BYTES, and 0.0f's bit pattern is all-zero, so this is 0.0f.
+    CUDA_CHECK(cudaMemset(d_.z, 0, bytes));
 
     // Boot the default look (preset 1, fireworks). set_preset uploads its emitter table
     // into __constant__ memory and sets params_.numEmitters -- so it MUST run before
@@ -886,6 +972,7 @@ ParticleSystem::~ParticleSystem()
     cudaFree(d_rng_);
     cudaFree(d_shells_);    // L6-2: shell state array
     cudaFree(d_shell_rng_); // L6-2: shell RNG pool
+    cudaFree(d_.z);         // L6 #7: Lorenz attractor's 3rd coordinate
 }
 
 // ===========================================================================

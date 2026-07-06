@@ -46,7 +46,10 @@ struct cudaGraphicsResource;
 // needs the complete type/size at that point, unlike the pointer above.
 struct ParticleSoA
 {
-    float *x, *y, *vx, *vy, *life, *cr, *cg, *cb;
+    // z (L6 #7) is the THIRD coordinate, used only by the Lorenz strange attractor:
+    // that style stores its 3D state in (x, y, z) and projects (x, z) to the screen.
+    // Every other style leaves z at 0 -- it costs one more device array either way.
+    float *x, *y, *z, *vx, *vy, *life, *cr, *cg, *cb;
 };
 
 class ParticleSystem

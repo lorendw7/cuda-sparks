@@ -454,6 +454,15 @@ tracks.)*
         (`atan2f(vy,vx)` → three sines 120° apart = a seamless rainbow hue wheel), so same-eddy
         particles share a hue and each eddy reads as a rotating color patch. Tuned to `curl 1.2`,
         `damping 0.75`, `F 6.12`.
+  - [ ] L6 **strange attractor** preset (key **7**) — a data-driven `useAttractor` mode, the first
+        **velocity-field** (not force) style: `dp/dt = f(p)`, so velocity is read straight from the
+        Lorenz ODE and position is integrated in **one** Euler step (no acceleration, no stored `v`).
+        Needs a 3rd coordinate `z` (added to `ParticleSoA`) because a 2D autonomous flow can't be
+        chaotic (Poincaré–Bendixson); the butterfly is drawn by projecting `(x, z)` to the screen.
+        **7a/7b DONE:** `lorenz()` velocity field (σ=10, ρ=28, β=8/3) + `spawn_attractor()` seeds the
+        Lorenz state space (x,y ±20, z 0..50). **7c/7d TODO:** the `useAttractor` branch in
+        `update_kernel` (Euler integrate with substep/timeScale for stability + `(x,z)` projection),
+        then coloring by speed/z. Preset #7 + the `z` array/`useAttractor` flags are already wired.
 - [ ] L7 Precision & bandwidth *(optional)* — FP16/`__half2` on tolerant fields, re-run L4 Nsight to confirm "fewer bytes ≈ less time"
 
 ### Application tracks (layered on the finished sim — separate docs)
