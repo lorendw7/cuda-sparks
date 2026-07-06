@@ -34,9 +34,11 @@ struct SimParams {
                           // Positive spins particles counter-clockwise -> spiral galaxy look.
     int numEmitters;
     int numShells;
-    int useShells, useRain;
+    int useShells, useRain, useFlow;
     float wind;         // constant horizontal wind acceleration (rain slant); 0 = off
     float turbulence;
+    float curl;
+    float time;
 };
 
 // ---------------------------------------------------------------------------
@@ -67,7 +69,8 @@ struct Preset
     float damping;        // air-drag factor (per 60fps-frame); v *= damping each step.
                           // 1.0 = frictionless, ~0.98 = noticeable drag. MUST be set per
                           // preset -- an omitted (0) value freezes every particle instantly.
-    int useShells, useRain;
+    int useShells, useRain, useFlow;
     float wind;           // copied into SimParams by set_preset(); 0 for non-rain presets
     float turbulence;
+    float curl;
 };

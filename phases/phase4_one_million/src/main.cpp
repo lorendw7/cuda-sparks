@@ -1,7 +1,7 @@
 // Phase 4 (L2-L5) -- window + GL context, then run the 1M-particle sim each frame.
 // CUDA-GL interop: the kernel writes vertices straight into the VBO (no CPU round
 // trip). Hotkeys switch effect presets: J = Jia (default), 1 = fireworks, 2 = fire,
-// 3 = galaxy, 4 = rain, 5 = smoke.
+// 3 = galaxy, 4 = rain, 5 = smoke, 6 = curl-noise.
 // SPARKS_MAX_FRAMES caps the loop so Nsight application-replay can profile it.
 // glad must be included before glfw.
 #include <glad/gl.h>
@@ -107,8 +107,10 @@ int main()
             {GLFW_KEY_3, 3},
             {GLFW_KEY_4, 4},
             {GLFW_KEY_5, 5},
+            {GLFW_KEY_6, 6},
         };
-        int prevState[6] = {
+        int prevState[7] = {
+            GLFW_RELEASE,
             GLFW_RELEASE,
             GLFW_RELEASE,
             GLFW_RELEASE,
@@ -157,17 +159,15 @@ int main()
             // preset's emitters + physics; existing particles adopt the new look only as
             // they recycle, so it fades in over ~1 lifetime. GLFW_KEY_* is the PHYSICAL
             // key, independent of Shift / Caps Lock -- so J is naturally case-insensitive.
-           for (int k = 0; k < 6; ++k)
-           {
+            for (int k = 0; k < 7; ++k)
+            {
                 int now = glfwGetKey(window, kBinds[k].key);
-                if (now  == GLFW_PRESS && prevState[k] == GLFW_RELEASE)
+                if (now == GLFW_PRESS && prevState[k] == GLFW_RELEASE)
                 {
                     sim.set_preset(kBinds[k].preset);
                 }
                 prevState[k] = now;
-                
-           }
-           
+            }
 
             if (maxFrames > 0 && ++frameCount >= maxFrames)
                 glfwSetWindowShouldClose(window, 1); // hit the cap -> exit the loop cleanly

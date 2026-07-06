@@ -15,9 +15,9 @@ __constant__ Emitter d_emitters[MAX_EMITTERS];
 // with the physics knobs (gravity / nbodyStrength / swirl / damping) that shape it.
 // ===========================================================================
 // Field order matches the struct: { emitters[MAX_EMITTERS], numEmitters, gravity,
-// nbodyStrength, swirl, damping, useShells, useRain, wind, turbulence }. damping (L6-1) is air drag:
-// v *= damping each step -- 1.0 frictionless, <1 decelerates. turbulence is smoke's random-walk kick
-// (0 for every other preset). Only the first numEmitters rows are used; the rest are
+// nbodyStrength, swirl, damping, useShells, useRain, useFlow, wind, turbulence, curl }. damping (L6-1)
+// is air drag: v *= damping each step -- 1.0 frictionless, <1 decelerates. turbulence is smoke's
+// random-walk kick; curl (L6) is the curl-noise flow-field strength -- both 0 for every other preset. Only the first numEmitters rows are used; the rest are
 // zero-filled by the aggregate initializer and never uploaded. Add/remove a whole
 // Preset here and numPresets (below) + the number keys in main.cpp pick it up.
 //   0 Jia       -- two diagonal jets (pink + gold), gentle swirl curves them into
@@ -30,6 +30,8 @@ __constant__ Emitter d_emitters[MAX_EMITTERS];
 //                  (useRain + spawn_rain -> a full-width curtain with a wet floor)
 //   5 smoke     -- one narrow upward vent; buoyancy lifts it, turbulence random-walks
 //                  it sideways into a widening plume that bounces under the top wall
+//   6 curl-noise-- particles seeded across the whole screen (spawn_scatter, useFlow),
+//                  advected by a smooth divergence-free curl-noise flow field (curl>0)
 // ===========================================================================
 static const Preset presets[] = {
     // ---- 0: Jia -- two diagonal jets (pink + gold) bent into arms by a gentle swirl ----
@@ -48,10 +50,12 @@ static const Preset presets[] = {
         0.00002f, // nbodyStrength  -- a light inward leash so the arms don't fly to the walls
         0.62f,    // swirl          -- gentle counter-clockwise vortex braids the two colors
         0.99962f, // damping        -- very light drag keeps the braided jets tight
-        0,
-        0,
-        0.0f, // useShells, useRain, wind
-        0.0f,
+        0,        // useShells
+        0,        // useRain
+        0,        // useFlow
+        0.0f,     // wind
+        0.0f,     // turbulence
+        0.0f,     // curl           -- flow field off
     },
     // ---- 1: fireworks -- 3 full-circle bursts, fast launch, slight swirl, fall under gravity ----
     {
@@ -70,10 +74,12 @@ static const Preset presets[] = {
                    //   the emitter ("spread in place") rather than a real fly-out-and-arc
                    //   burst. Raise toward 0.99 to let them travel farther; the true
                    //   born-together / explode / die-together look arrives with L6 shell bursts.
-        1,
-        0,
-        0.0f, // useShells, useRain, wind
-        0.0f,
+        1,         // useShells
+        0,         // useRain
+        0,         // useFlow
+        0.0f,      // wind
+        0.0f,      // turbulence
+        0.0f,      // curl           -- flow field off
     },
     // ---- 2: fire -- 3 narrow upward jets along the bottom, buoyant (negative gravity), warm ----
     {
@@ -87,10 +93,12 @@ static const Preset presets[] = {
         0.000006f,
         0.0f,
         0.99f, // damping -- light drag so the flames settle instead of shooting off
-        0,
-        0,
-        0.0f, // useShells, useRain, wind
-        0.0f,
+        0,     // useShells
+        0,     // useRain
+        0,     // useFlow
+        0.0f,  // wind
+        0.0f,  // turbulence
+        0.0f,  // curl           -- flow field off
     },
     // ---- 3: galaxy -- warm orange core + two cool arms, wound by swirl into a spinning disk ----
     // The orange source sits AT the origin (0,0): swirl/nbody are both centered there, so a
@@ -109,10 +117,12 @@ static const Preset presets[] = {
         0.00003f, // nbodyStrength  -- inward pull that tightens the disk (balance this vs swirl)
         1.2f,     // swirl          -- orbital spin; winds the two offset arms into spirals
         1.0f,     // damping        -- 1.0 = frictionless, so orbits stay stable & long-lived
-        0,
-        0,
-        0.0f,
-        0.0f,
+        0,        // useShells
+        0,        // useRain
+        0,        // useFlow
+        0.0f,     // wind
+        0.0f,     // turbulence
+        0.0f,     // curl           -- flow field off
     },
     // ---- 4: rain -- a full-width falling curtain that puddles on the floor (useRain=1). ----
     // update_kernel spawns each drop via spawn_rain (random x, depth-scaled downward speed),
@@ -132,9 +142,11 @@ static const Preset presets[] = {
         0.0f,  // swirl         -- off: rain doesn't spin
         0.99f, // damping       -- light drag so drops keep speeding up (never 0 = would freeze them)
         0,     // useShells     -- continuous model, no shell burst
-        1,
-        0.3,
-        0.0f,
+        1,     // useRain
+        0,     // useFlow
+        0.3,   // wind
+        0.0f,  // turbulence
+        0.0f,  // curl          -- flow field off
     },
     // ---- 5: smoke -- one narrow upward vent, buoyant rise + turbulent diffusion. ----
     // A single bottom-center emitter aims a slow, gray, long-lived stream straight up
@@ -152,15 +164,44 @@ static const Preset presets[] = {
             //  x     y     angle    spread baseSpd  r     g     b    life
             {0.0f, -0.7f, 1.5708f, 0.35f, 0.25f, 0.55f, 0.55f, 0.6f, 8.0f}, // slow gray upward vent
         },
-        1,       // numEmitters
-        -0.20f,  // gravity       -- negative: gentle buoyant rise (softer than fire's -0.5)
-        0.0f,    // nbodyStrength -- off
-        0.0f,    // swirl         -- off
-        0.996f,  // damping       -- light drag: the plume slows as it rises
-        0,       // useShells     -- continuous model
-        0,       // useRain
-        0.0f,    // wind          -- off (add a touch for a leaning column)
-        0.3f,    // turbulence    -- random horizontal walk -> widening, curling diffusion
+        1,      // numEmitters
+        -0.20f, // gravity       -- negative: gentle buoyant rise (softer than fire's -0.5)
+        0.0f,   // nbodyStrength -- off
+        0.0f,   // swirl         -- off
+        0.996f, // damping       -- light drag: the plume slows as it rises
+        0,      // useShells     -- continuous model
+        0,      // useRain
+        0,      // useFlow
+        0.0f,   // wind          -- off (add a touch for a leaning column)
+        0.3f,   // turbulence    -- random horizontal walk -> widening, curling diffusion
+        0.0f,   // curl          -- flow field off (smoke uses white-noise turbulence, not a coherent field)
+    },
+    // ---- 6: curl-noise -- a screen-filling cloud advected by a smooth flow field. ----
+    // Particles are seeded EVERYWHERE (spawn_scatter, useFlow=1) so the per-position flow
+    // field is visible, then pushed by force #6 (the curl of psi). gravity/swirl/nbody are
+    // all off -- the flow field IS the motion. Strong damping (0.75) kills momentum so
+    // velocity tracks the field each frame -> clean streamlines instead of inertial smear.
+    // The eddies are made VISIBLE by coloring each particle by its velocity DIRECTION (see
+    // the useFlow branch in update_kernel's vertex write) -- density stays uniform (the field
+    // is divergence-free), so the swirls only show up through direction-hue, not dot spacing.
+    // The emitter row's color is thus unused here; only its life is read. params.time
+    // (accumulated in update()) drifts the field so the flow never repeats.
+    {
+        {
+            //  x    y   angle spread baseSpd  r    g    b   life
+            {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.3, 0.8, 0.9, 8.6f}, // scatter ignores pos/aim; row gives color + life
+        },
+        1,     // numEmitters
+        0.0f,  // gravity        -- off (the flow field drives all motion)
+        0.0f,  // nbodyStrength  -- off
+        0.0f,  // swirl          -- off (the curl field provides the swirl)
+        0.75f, // damping        -- strong: velocity tracks the field (near-advection)
+        0,     // useShells
+        0,     // useRain
+        1,     // useFlow        -- ON: births via spawn_scatter (seed the whole screen)
+        0.0f,  // wind
+        0.0f,  // turbulence
+        1.2f,  // curl           -- flow-field strength (turns force #6 on)
     }};
 
 static const int numPresets = sizeof(presets) / sizeof(presets[0]);
@@ -199,6 +240,8 @@ void ParticleSystem::set_preset(int i)
     params_.useRain = pr.useRain;
     params_.wind = pr.wind;
     params_.turbulence = pr.turbulence;
+    params_.curl = pr.curl;
+    params_.useFlow = pr.useFlow;
 }
 
 // A small palette of saturated firework colors; advance_shells picks one per burst.
@@ -213,6 +256,50 @@ __device__ const float palette[][3] = {
     {0.4f, 1.0f, 1.0f}, // cyan
 };
 
+// ===========================================================================
+// psi  --  a smooth scalar "potential" field: one number at every (x, y, t).  (L6 curl-noise)
+// ===========================================================================
+// The raw material for the curl-noise flow field (style #6). Think of it as a
+// time-varying terrain HEIGHT map: one value per point, smooth everywhere. 6b takes
+// its curl to get a divergence-free flow vector -- particles slide along psi's
+// contour lines (never up/down them), so they swirl without ever bunching up.
+//   * SMOOTH across space  -> neighbors read near values -> they flow together
+//     (this is the coherent field that white-noise turbulence, in smoke, is not).
+//   * DRIFTS over time      -> the +/- t phase morphs the terrain, so the eddies
+//     keep reorganizing and the flow never repeats.
+// Built from two "octaves" (sine-wave layers): the first is the big, coarse swell;
+// the second, at 2x frequency and 0.5x amplitude, adds finer detail on top. F is the
+// base spatial frequency = eddy size (bigger F -> smaller, tighter eddies). This is a
+// cheap analytic stand-in for Perlin/simplex noise -- swappable later without
+// touching 6b, since the curl there samples psi as a black box.
+// ===========================================================================
+__device__ inline float psi(float x, float y, float t)
+{
+    float F = 6.12f;                                                 // base spatial frequency (eddy size); larger = smaller eddies
+    return sinf(F * x + t) * cosf(F * y - t)                         // octave 1: coarse swell
+           + 0.5f * sinf(2.0f * F * y - t) * cosf(2.0f * F * x + t); // octave 2: finer detail (2x freq, 0.5x amp)
+}
+
+// ===========================================================================
+// curl_noise  --  the divergence-free flow vector at (x, y, t).  (L6 curl-noise, 6b)
+// ===========================================================================
+// Takes the 2D CURL of the scalar potential psi: rotate its gradient 90 degrees so
+// the flow runs ALONG psi's contour lines, never up/down them -> particles swirl but
+// never pile up (divergence = 0, guaranteed by construction: div of a curl is the
+// difference of the two equal mixed partials, which cancels for ANY smooth psi).
+// The partials are estimated by CENTRAL FINITE DIFFERENCES (sample psi a tiny step
+// eps to each side, rise / run), so psi stays a black box -- swap in Perlin noise
+// later and this code is unchanged. Two outputs, written back through the fx/fy
+// POINTERS the caller supplies (the void-return "return two values" idiom).
+// ===========================================================================
+__device__ inline void curl_noise(float x, float y, float t, float *fx, float *fy)
+{
+    float eps = 0.01f;                                                       // finite-difference step: small enough to be local, big enough to dodge float cancellation
+    float dpsi_dx = ((psi(x + eps, y, t) - psi(x - eps, y, t))) / (2 * eps); // d(psi)/dx: right minus left, over the span
+    float dpsi_dy = ((psi(x, y + eps, t) - psi(x, y - eps, t))) / (2 * eps); // d(psi)/dy: up minus down
+    *fx = dpsi_dy;                                                           //  along-contour x-component  =  d(psi)/dy
+    *fy = -dpsi_dx;                                                          //  along-contour y-component  = -d(psi)/dx  (the 90-degree rotation of the gradient)
+}
 // ===========================================================================
 // spawn_burst  --  born particle i from a SHELL, not an emitter.  (L6-2)
 // ===========================================================================
@@ -261,6 +348,18 @@ __device__ inline void spawn_rain(ParticleSoA p, int i,
     p.cg[i] = d_emitters[0].g * b;
     p.cb[i] = d_emitters[0].b * b;
     p.life[i] = 999.9f;
+}
+
+__device__ inline void spawn_scatter(ParticleSoA p, int i, curandState *st)
+{
+    p.x[i] = (curand_uniform(st) - 0.5f) * 2.0f;
+    p.y[i] = (curand_uniform(st) - 0.5f) * 2.0f;
+    p.vx[i] = 0.0f;
+    p.vy[i] = 0.0f;
+    p.cr[i] = d_emitters[0].r;
+    p.cb[i] = d_emitters[0].b;
+    p.cg[i] = d_emitters[0].g;
+    p.life[i] = d_emitters[0].lifetime * (0.7f + 0.3f * curand_uniform(st));
 }
 
 // ===========================================================================
@@ -499,6 +598,23 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
     //    real frame time, clamped to (0, 0.05] upstream, so it is never zero here.)
     ax += (curand_uniform(&rng[i]) - 0.5f) * params.turbulence / sqrtf(dt);
 
+    // 6) Curl-noise flow field (style #6): a smooth, divergence-free vector field
+    //    sampled at THIS particle's own position (px, py). Because the field is smooth,
+    //    neighbors read nearby vectors and swirl together in coherent eddies -- the
+    //    coherent-field upgrade of smoke's per-particle white-noise kick (force 5). It's
+    //    divergence-free (built as the curl of a scalar potential), so particles never
+    //    pile up or leave holes -- they just flow. params.time (accumulated per frame in
+    //    update()) drifts the field so the eddies keep reorganizing and never repeat.
+    //    Gated by params.curl (0 for every other preset -> adding 0 is a no-op, no
+    //    branch needed, exactly like wind and turbulence). Added as an acceleration into
+    //    the accumulator; strong damping in this preset makes velocity track the field
+    //    (near-advection). A true velocity-field model (overwrite v, not add to a) is
+    //    the strange attractor's job (#7).
+    float fx, fy;
+    curl_noise(px, py, params.time, &fx, &fy); // sample the flow vector here; written into fx/fy
+    ax += fx * params.curl;
+    ay += fy * params.curl;
+
     // --- Integrate (semi-implicit Euler) --------------------------------------
     // Velocity first, THEN use the NEW velocity to move the position. This
     // ordering (not position-first) keeps orbits stable, which swirl needs.
@@ -592,6 +708,11 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
             {
                 spawn_rain(p, i, &rng[i]);
             }
+            else if (params.useFlow)
+            {
+                spawn_scatter(p, i, &rng[i]);
+            }
+
             else
             {
                 spawn(p, i, params.numEmitters, &rng[i]);
@@ -625,11 +746,27 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
     float *v = &vbo[i * 5]; // this particle's 5 floats inside the VBO
     if (visible)
     {
-        v[0] = p.x[i];         // attribute 0 (pos.x) -- shader reads offset 0
-        v[1] = p.y[i];         // attribute 0 (pos.y)
-        v[2] = p.cr[i] * fade; // attribute 1 (color.r) -- shader reads offset 8
-        v[3] = p.cg[i] * fade; // attribute 1 (color.g)
-        v[4] = p.cb[i] * fade; // attribute 1 (color.b)
+        v[0] = p.x[i]; // attribute 0 (pos.x) -- shader reads offset 0
+        v[1] = p.y[i]; // attribute 0 (pos.y)
+        if (params.useFlow)
+        {
+            // FLOW COLORING (显影): color by velocity DIRECTION so the otherwise-invisible
+            // divergence-free field shows up. The field keeps density uniform (nothing to
+            // see from dot positions), but particles in the same eddy move alike -> share a
+            // hue -> the eddy reads as a rotating color patch. atan2(vy, vx) is the movement
+            // angle (-pi..pi); three sines 120 deg apart map it onto a seamless rainbow wheel
+            // (R/G/B peak at different angles, so each direction gets its own vivid hue).
+            float ang = atan2f(p.vy[i], p.vx[i]);       // movement direction (note: y first, then x)
+            v[2] = (0.5f + 0.5f * sinf(ang)) * fade;          // R
+            v[3] = (0.5f + 0.5f * sinf(ang + 2.094f)) * fade; // G, phase +120 deg (2pi/3)
+            v[4] = (0.5f + 0.5f * sinf(ang + 4.189f)) * fade; // B, phase +240 deg (4pi/3)
+        }
+        else
+        {
+            v[2] = p.cr[i] * fade; // attribute 1 (color.r) -- shader reads offset 8
+            v[3] = p.cg[i] * fade; // attribute 1 (color.g)
+            v[4] = p.cb[i] * fade; // attribute 1 (color.b)
+        }
     }
     else
     {
@@ -777,6 +914,7 @@ void ParticleSystem::update(float dt)
     //    vertices straight into d_vbo. Order matters -- update_kernel must see the
     //    shell state advance_shells just produced.
     int sblock = 256, sgrid = (params_.numShells + sblock - 1) / sblock;
+    params_.time += dt;
     advance_shells<<<sgrid, sblock>>>(d_shells_, params_.numShells, dt, (curandState *)d_shell_rng_);
     CUDA_CHECK(cudaGetLastError());
     int block = 256;

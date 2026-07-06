@@ -440,6 +440,20 @@ tracks.)*
         grows as √(steps), and over a fixed second there are `1/dt` steps of size ~`dt`, so a constant
         coefficient would give spread ~√dt (less diffusion at higher FPS) — the same class of bug the
         `dt` clamp and `powf(damping, dt*60)` drag already fixed elsewhere.
+  - [x] L6 **curl-noise flow field** preset (key **6**) — a data-driven `useFlow` mode; the
+        coherent-field upgrade of smoke's white noise. A scalar potential `psi(x,y,t)` (a couple
+        of drifting sine octaves) is turned into a **divergence-free flow vector** by taking its
+        2D **curl** (`fx = ∂ψ/∂y`, `fy = −∂ψ/∂x`, estimated by central finite differences) — added
+        as force #6, gated by a `curl` knob (0 for every other preset, so no branch). A new
+        `time` field in `SimParams`, accumulated per frame in `update()`, drifts the field so the
+        eddies never repeat. `spawn_scatter` seeds particles across the **whole screen** (a
+        per-position field is invisible from a point emitter), and strong damping (0.75) makes
+        velocity track the field (near-advection). **Key insight:** because the field is
+        divergence-free, density stays uniform → the swirls are invisible from dot positions;
+        they are made visible by **coloring each particle by its velocity direction**
+        (`atan2f(vy,vx)` → three sines 120° apart = a seamless rainbow hue wheel), so same-eddy
+        particles share a hue and each eddy reads as a rotating color patch. Tuned to `curl 1.2`,
+        `damping 0.75`, `F 6.12`.
 - [ ] L7 Precision & bandwidth *(optional)* — FP16/`__half2` on tolerant fields, re-run L4 Nsight to confirm "fewer bytes ≈ less time"
 
 ### Application tracks (layered on the finished sim — separate docs)
