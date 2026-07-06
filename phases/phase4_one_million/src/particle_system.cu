@@ -224,18 +224,18 @@ static const Preset presets[] = {
             //  x    y   angle spread baseSpd  r    g    b   life
             {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.4f, 0.8f, 1.0f, 12.0f}, // scatter seeds ignore pos/aim; row gives color + life
         },
-        1,     // numEmitters
-        0.0f,  // gravity        -- off (the Lorenz field IS the motion)
-        0.0f,  // nbodyStrength  -- off
-        0.0f,  // swirl          -- off
-        1.0f,  // damping        -- 1.0 frictionless: velocity IS the field, no drag wanted
-        0,     // useShells
-        0,     // useRain
-        0,     // useFlow
-        0.0f,  // wind
-        0.0f,  // turbulence
-        0.0f,  // curl
-        1,     // useAttractor   -- ON: the whole reason this preset exists
+        1,    // numEmitters
+        0.0f, // gravity        -- off (the Lorenz field IS the motion)
+        0.0f, // nbodyStrength  -- off
+        0.0f, // swirl          -- off
+        1.0f, // damping        -- 1.0 frictionless: velocity IS the field, no drag wanted
+        0,    // useShells
+        0,    // useRain
+        0,    // useFlow
+        0.0f, // wind
+        0.0f, // turbulence
+        0.0f, // curl
+        1,    // useAttractor   -- ON: the whole reason this preset exists
     }};
 
 static const int numPresets = sizeof(presets) / sizeof(presets[0]);
@@ -431,7 +431,7 @@ __device__ inline void spawn_attractor(ParticleSoA p, int i, curandState *st)
 {
     p.x[i] = (curand_uniform(st) - 0.5f) * 40.0f;
     p.y[i] = (curand_uniform(st) - 0.5f) * 40.0f;
-    p.z[i] = curand_uniform(st)  * 50.0f;
+    p.z[i] = curand_uniform(st) * 50.0f;
     p.vx[i] = 0.0f;
     p.vy[i] = 0.0f;
     p.cr[i] = d_emitters[0].r;
@@ -620,7 +620,84 @@ __global__ void update_kernel(ParticleSoA p, float *vbo, int n, SimParams params
     int i = blockIdx.x * blockDim.x + threadIdx.x; // global thread id = particle index
     if (i >= n)                                    // grid usually rounds up past n:
         return;                                    // extra threads must do nothing
+    // --- Strange attractor (#7): a VELOCITY-FIELD path -- handled FIRST, then RETURN --
+    // Every style BELOW is a force model (sum accelerations -> integrate v -> move).
+    // This one is not: the Lorenz ODE gives velocity DIRECTLY as a function of the 3D
+    // state, dp/dt = f(p), so there is no (ax,ay) accumulator, no stored velocity, no
+    // drag. Crucially, (x,y,z) here hold the Lorenz STATE in its OWN range (x,y ~ +/-20,
+    // z ~ 0..50), NOT screen coordinates -- so this state must never reach the
+    // wall-clamp / drag / fade code below, all of which assume p.x/p.y ARE the on-screen
+    // position in [-1,1] (the wall clamp would pin the +/-20 state into a 1x1 box and
+    // destroy the butterfly). A single early return keeps the raw state clear of that
+    // whole pipeline; we project it to the screen ourselves at the end.
+    if (params.useAttractor)
+    {
+        // The 3D Lorenz STATE (not screen coords). Held in registers across the substep
+        // loop so we touch global memory only once to read and once to write.
+        float x = p.x[i], y = p.y[i], z = p.z[i];
 
+        // Integrate dp/dt = lorenz(p) with forward Euler, SUBSTEPPED for stability.
+        // We advance dt*timeScale of "Lorenz time" this frame -- scaling by the REAL dt
+        // makes the evolution speed frame-rate independent (timeScale is the visual-speed
+        // knob). One big Euler step of that whole span would extrapolate the large,
+        // fast-changing Lorenz velocity too far and diverge to NaN (the butterfly
+        // vanishes); splitting it into `sub` small steps of size h, RE-SAMPLING lorenz()
+        // at the new point each step, keeps every jump tiny so the straight segments hug
+        // the curved trajectory.
+        float timeScale = 1.0f; // Lorenz-time advanced per real second = how fast the butterfly evolves
+        // ADAPTIVE substep count: pick JUST enough steps that each one is <= 0.006 (the
+        // forward-Euler stability/accuracy ceiling for this field), and no more.
+        // dt*timeScale/0.006 = the exact fractional steps needed; ceilf rounds UP so h can
+        // never exceed 0.006; max(1,..) floors it at one step (guards a dt that rounds to 0).
+        // So h auto-tracks ~0.006 at ANY frame rate: ~1 step at high FPS (tiny dt, no wasted
+        // work), more steps when a slow frame would otherwise take a dangerously big jump.
+        int sub = max(1, (int)ceilf(dt * timeScale / 0.006f));
+        float h = dt * timeScale / sub; // one substep's size (<= 0.006 by construction)
+        for (int k = 0; k < sub; k++)
+        {
+            float dx, dy, dz;
+            lorenz(x, y, z, &dx, &dy, &dz); // fresh velocity at the CURRENT point
+            x += dx * h;                    // forward Euler on each of the 3 state coords
+            y += dy * h;
+            z += dz * h;
+        }
+
+        // Write the evolved state back into the SoA arrays for next frame's read.
+        p.x[i] = x;
+        p.y[i] = y;
+        p.z[i] = z;
+
+        // Age + reseed. Chaos collapses every seed onto the SAME butterfly manifold, so
+        // without rebirth the cloud would slowly stop looking alive; spawn_attractor
+        // scatters a dead particle back across the whole state space, and fresh points
+        // spiral back in -- keeping the motion perpetually varied.
+        p.life[i] -= dt;
+        if (p.life[i] <= 0)
+        {
+            spawn_attractor(p, i, &rng[i]);
+            // Refresh the register copies: spawn_attractor just wrote a NEW seed into
+            // p.x/y/z, but the projection below reads x/z -- without this it would draw the
+            // stale pre-death position for one frame (the "emit the vertex AFTER respawn,
+            // from fresh state" rule, the same ordering the continuous model relies on).
+            x = p.x[i];
+            y = p.y[i];
+            z = p.z[i];
+        }
+
+        // PROJECT the 3D state onto the 2D screen: draw the (x, z) plane -- the plane the
+        // butterfly's two wings live in -- and drop y (it becomes the depth we look
+        // through; y is still fully simulated above, just not drawn). x is already
+        // centered on 0 so it only scales; z spans 0..50, so shift by -25 to center it
+        // first. /25 maps each ~+/-25 half-range into [-1,1] with a little margin.
+        float sx = x / 25.0f, sy = (z - 25.0f) / 25.0f;
+        float *v = &vbo[i * 5]; // this particle's 5-float slice [x,y,r,g,b] of the VBO
+        v[0] = sx;              // screen x  <- state x
+        v[1] = sy;              // screen y  <- state z
+        v[2] = p.cr[i];         // flat emitter hue for now (coloring by speed/z is 7d)
+        v[3] = p.cg[i];
+        v[4] = p.cb[i];
+        return; // done -- skip the entire force model below
+    }
     // --- Force accumulator (L5-3) ---------------------------------------------
     // Newton: a force produces an ACCELERATION. We sum every force's acceleration
     // into (ax, ay) first, then apply it once. No dt here -- dt is one "per second"

@@ -100,6 +100,7 @@ int main()
             int key;
             int preset;
         };
+
         const KeyBind kBinds[] = {
             {GLFW_KEY_J, 0},
             {GLFW_KEY_1, 1},
@@ -108,8 +109,13 @@ int main()
             {GLFW_KEY_4, 4},
             {GLFW_KEY_5, 5},
             {GLFW_KEY_6, 6},
-        };
-        int prevState[7] = {
+            {GLFW_KEY_7, 7}};
+        const int nBinds = sizeof(kBinds) / sizeof(kBinds[0]); // count from the table itself -> prevState size + loop bound track it; adding a preset = one kBinds row
+        // Previous-frame state of each bind's key (parallel to kBinds), for the
+        // RELEASE->PRESS edge detection in the loop below. Sized nBinds so it always
+        // matches the table; any slots left unlisted would zero-init to GLFW_RELEASE (0).
+        int prevState[nBinds] = {
+            GLFW_RELEASE,
             GLFW_RELEASE,
             GLFW_RELEASE,
             GLFW_RELEASE,
@@ -159,7 +165,7 @@ int main()
             // preset's emitters + physics; existing particles adopt the new look only as
             // they recycle, so it fades in over ~1 lifetime. GLFW_KEY_* is the PHYSICAL
             // key, independent of Shift / Caps Lock -- so J is naturally case-insensitive.
-            for (int k = 0; k < 7; ++k)
+            for (int k = 0; k < nBinds; ++k)
             {
                 int now = glfwGetKey(window, kBinds[k].key);
                 if (now == GLFW_PRESS && prevState[k] == GLFW_RELEASE)

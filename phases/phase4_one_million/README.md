@@ -454,15 +454,23 @@ tracks.)*
         (`atan2f(vy,vx)` → three sines 120° apart = a seamless rainbow hue wheel), so same-eddy
         particles share a hue and each eddy reads as a rotating color patch. Tuned to `curl 1.2`,
         `damping 0.75`, `F 6.12`.
-  - [ ] L6 **strange attractor** preset (key **7**) — a data-driven `useAttractor` mode, the first
+  - [x] L6 **strange attractor** preset (key **7**) — a data-driven `useAttractor` mode, the first
         **velocity-field** (not force) style: `dp/dt = f(p)`, so velocity is read straight from the
-        Lorenz ODE and position is integrated in **one** Euler step (no acceleration, no stored `v`).
-        Needs a 3rd coordinate `z` (added to `ParticleSoA`) because a 2D autonomous flow can't be
-        chaotic (Poincaré–Bendixson); the butterfly is drawn by projecting `(x, z)` to the screen.
-        **7a/7b DONE:** `lorenz()` velocity field (σ=10, ρ=28, β=8/3) + `spawn_attractor()` seeds the
-        Lorenz state space (x,y ±20, z 0..50). **7c/7d TODO:** the `useAttractor` branch in
-        `update_kernel` (Euler integrate with substep/timeScale for stability + `(x,z)` projection),
-        then coloring by speed/z. Preset #7 + the `z` array/`useAttractor` flags are already wired.
+        Lorenz ODE and position is integrated directly (no acceleration, no stored `v`). Needs a 3rd
+        coordinate `z` (added to `ParticleSoA`) because a 2D autonomous flow can't be chaotic
+        (Poincaré–Bendixson); the butterfly is drawn by projecting `(x, z)` to the screen.
+        `lorenz()` velocity field (σ=10, ρ=28, β=8/3) + `spawn_attractor()` seeds the Lorenz state
+        space (x,y ±20, z 0..50). The `update_kernel` `useAttractor` branch runs **first and early-
+        returns**, keeping the raw ±20..50 state clear of the force-model pipeline (whose wall-clamp
+        would pin it into a 1×1 box and destroy the butterfly). It integrates with forward Euler
+        **substepped** for stability — an **adaptive** step count (`sub = ceil(dt·timeScale / 0.006)`)
+        holds every step ≤ 0.006 at any FPS, so a long frame can't extrapolate the fast Lorenz
+        velocity into a NaN blow-up — then reseeds dead particles via `spawn_attractor` (refreshing
+        the register copies so the vertex is drawn from the *new* seed) and projects `(x, z)` to the
+        screen (x already centered → scale by 1/25; z spans 0..50 → shift −25, then the same 1/25 so
+        the aspect ratio stays true). Key **7** is bound in `main.cpp` (the `kBinds` table now
+        auto-sizes via `nBinds = sizeof(kBinds)/sizeof(kBinds[0])`, so adding a preset is one row).
+        Coloring by speed/z + trail persistence are deferred to the optional per-style polish below.
 - [ ] L7 Precision & bandwidth *(optional)* — FP16/`__half2` on tolerant fields, re-run L4 Nsight to confirm "fewer bytes ≈ less time"
 
 ### Application tracks (layered on the finished sim — separate docs)
