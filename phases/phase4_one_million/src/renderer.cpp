@@ -94,17 +94,7 @@ bool Renderer::init(int max_particles)
     return true;
 }
 
-// Copy one fresh frame of [x,y,r,g,b] vertices into the pre-allocated VBO.
-void Renderer::upload(const std::vector<float> &interleaved, int count)
-{
-    count_ = count;                      // remember this frame's particle count for draw()
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_); // select our VBO
-    glBufferSubData(GL_ARRAY_BUFFER, 0,  // overwrite the front of the existing buffer (offset 0)...
-                    (long long)count * 5 * sizeof(float), // ...this many bytes...
-                    interleaved.data()); // ...from the vector's raw array. No realloc = cheap per frame.
-}
 
-// Draw the most recently uploaded particles as points. Call once per frame.
 void Renderer::draw()
 {
     glUseProgram(program_);             // activate our shader program

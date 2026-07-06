@@ -95,6 +95,27 @@ int main()
         const char *maxEnv = std::getenv("SPARKS_MAX_FRAMES");
         long maxFrames = maxEnv ? std::atol(maxEnv) : 0; // 0 = run forever (normal use)
         long frameCount = 0;
+        struct KeyBind
+        {
+            int key;
+            int preset;
+        };
+        const KeyBind kBinds[] = {
+            {GLFW_KEY_J, 0},
+            {GLFW_KEY_1, 1},
+            {GLFW_KEY_2, 2},
+            {GLFW_KEY_3, 3},
+            {GLFW_KEY_4, 4},
+            {GLFW_KEY_5, 5},
+        };
+        int prevState[6] = {
+            GLFW_RELEASE,
+            GLFW_RELEASE,
+            GLFW_RELEASE,
+            GLFW_RELEASE,
+            GLFW_RELEASE,
+            GLFW_RELEASE,
+        };
 
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
@@ -126,40 +147,27 @@ int main()
             glfwSwapBuffers(window); // present the frame
             glfwPollEvents();        // handle close/keyboard events
 
-            // Hotkeys switch the effect preset live. glfwGetKey reads the current key
-            // state (already refreshed by glfwPollEvents above); a press re-uploads that
-            // preset's emitters + physics. Existing particles adopt the new look only as
+            // Hotkeys switch the effect preset live. Table-driven (kBinds) so the
+            // logic is written once and looped over every key; adding a preset is one
+            // table row. EDGE-DETECTED (debounce): glfwGetKey returns the current level
+            // (PRESS while held), which at thousands of FPS would re-fire set_preset --
+            // and its cudaMemcpyToSymbol -- every frame a key is down. Comparing this
+            // frame's state to the last (prevState[k]) fires only on the RELEASE->PRESS
+            // transition, so one physical press = one switch. A switch re-uploads that
+            // preset's emitters + physics; existing particles adopt the new look only as
             // they recycle, so it fades in over ~1 lifetime. GLFW_KEY_* is the PHYSICAL
             // key, independent of Shift / Caps Lock -- so J is naturally case-insensitive.
-            if (glfwGetKey(window, GLFW_KEY_J) == GLFW_PRESS)
-            {
-                sim.set_preset(0); // Jia
-            }
-
-            if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS)
-            {
-                sim.set_preset(1); // fireworks
-            }
-
-            if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS)
-            {
-                sim.set_preset(2); // fire
-            }
-
-            if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS)
-            {
-                sim.set_preset(3); // galaxy
-            }
-
-            if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS)
-            {
-                sim.set_preset(4); // rain
-            }
-
-            if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS)
-            {
-                sim.set_preset(5); // smoke
-            }
+           for (int k = 0; k < 6; ++k)
+           {
+                int now = glfwGetKey(window, kBinds[k].key);
+                if (now  == GLFW_PRESS && prevState[k] == GLFW_RELEASE)
+                {
+                    sim.set_preset(kBinds[k].preset);
+                }
+                prevState[k] = now;
+                
+           }
+           
 
             if (maxFrames > 0 && ++frameCount >= maxFrames)
                 glfwSetWindowShouldClose(window, 1); // hit the cap -> exit the loop cleanly

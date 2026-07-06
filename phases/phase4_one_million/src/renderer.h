@@ -1,5 +1,4 @@
 #pragma once
-#include <vector>
 
 // ---------------------------------------------------------------------------
 // Renderer -- draws particles as OpenGL points. Hand-written from scratch in
@@ -7,10 +6,6 @@
 // program), so it follows the RAII pattern: acquire in init(), release in the
 // destructor, and forbid copying (see below).
 //
-// Vertex format expected by upload(): 5 floats per particle, interleaved:
-//     [ x, y, r, g, b,  x, y, r, g, b,  ... ]
-//   x,y   : clip-space position, range [-1, 1]  (drawn directly)
-//   r,g,b : color, range [0, 1]
 // ---------------------------------------------------------------------------
 class Renderer
 {
@@ -18,7 +13,7 @@ private:
     unsigned int vao_     = 0;  // vertex-array object id (the attribute layout)
     unsigned int vbo_     = 0;  // vertex-buffer object id (the vertex bytes on GPU)
     unsigned int program_ = 0;  // linked shader program id
-    int          count_   = 0;  // particle count from the most recent upload()
+    int          count_   = 0;  // particle count to draw (set in init(); = max_particles)
 
 public:
     // Constructor does NOTHING with GL: no GL context exists yet at construction
@@ -39,10 +34,8 @@ public:
     // max_particles = how many particles the VBO is pre-sized to hold.
     bool init(int max_particles);
 
-    // Copy one fresh frame of [x,y,r,g,b] vertices to the GPU. count = particles.
-    void upload(const std::vector<float>& interleaved, int count);
-
-    // Draw the most recently uploaded particles. Call once per frame.
+    // Draw count_ particles from the VBO (the CUDA kernel writes it directly via
+    // interop -- there is no CPU upload step). Call once per frame.
     void draw();
 
     unsigned int vbo() const {return vbo_;}

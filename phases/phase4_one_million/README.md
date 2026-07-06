@@ -82,10 +82,10 @@ round trip (36 MB down + CPU repack + 20 MB up). This is the wall L2 tears out.
 physics itself. The remaining per-frame cost has moved off the sim entirely (into
 `draw` / buffer swap), which is what L4's Nsight pass will dissect.
 
-> Cleanup status: L3 deleted `host_` and `to_vertices()`. `Renderer::upload()` is
-> still present but is now **dead code** — the L2 interop path writes the VBO directly,
-> so nothing calls it. Kept as a reference for the pre-interop upload pattern; safe to
-> delete whenever.
+> Cleanup status: L3 deleted `host_` and `to_vertices()`; the now-dead
+> `Renderer::upload()` (unused once the L2 interop path wrote the VBO directly) was
+> **deleted** in the cleanup pass, along with its `#include <vector>`. The renderer's
+> only data path is now interop.
 
 ### L3 — Structure of Arrays (SoA)
 
@@ -288,13 +288,12 @@ looking procedural and starts looking real.
 > emitter rather than launching as a discrete, born-together burst. This is the exact
 > artifact the shell-burst step removes.
 >
-> **Input backlog — key debounce:** `main.cpp` polls `glfwGetKey(... ) == GLFW_PRESS`
-> every frame, so holding a number key re-calls `set_preset` (and re-uploads the emitter
-> table via `cudaMemcpyToSymbol`) *thousands* of times per second. Harmless today but
-> wasteful; add edge detection (fire only on the down-transition: remember last frame's
-> state, act when `now == PRESS && prev == RELEASE`). Folds naturally into the
-> Presentation track's input handling (see PRESENTATION.md), or do it as a one-line
-> cleanup before then.
+> **Input — key debounce (DONE):** the hotkey handling was table-driven (a `kBinds`
+> array of `{key, preset}` rows, looped over so the logic is written once) and
+> **edge-detected**: each key's previous-frame state is kept in `prevState[]`, and
+> `set_preset` fires only on the `RELEASE -> PRESS` transition (`now == PRESS &&
+> prev == RELEASE`). One physical press = one switch + one `cudaMemcpyToSymbol`, instead
+> of thousands per second while a key is held.
 
 **Visual polish — firework shapes, color & effects (planned, fireworks branch of L6):**
 
