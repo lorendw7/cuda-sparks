@@ -30,6 +30,14 @@ manual control.
   seconds later by the auto-cycler.
 - The transition is already soft: a preset change fades in over ~1 lifetime as particles
   recycle, so auto-play never hard-cuts.
+- **(Enhancement) Randomized order.** Instead of the fixed `(current + 1) % numPresets`
+  sequential walk, pick the next preset at random so the show never repeats the same loop.
+  Draw a random index (`std::mt19937` / `std::uniform_int_distribution`, or `std::rand`),
+  and **re-draw if it equals `current`** so you never "advance" to the preset already on
+  screen (a self-transition would look like a stall). Optional: keep a short history to
+  avoid recently-shown presets, or a shuffled-deck order (shuffle all presets, play through,
+  reshuffle) so every preset shows once per round before any repeats. Make sequential vs
+  random a small flag/menu toggle later in P3.
 
 *Deliverable:* the sim runs itself as an ambient display, and you can grab manual control
 with the keyboard at any time.

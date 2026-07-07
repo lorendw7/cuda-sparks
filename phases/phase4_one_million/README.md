@@ -508,3 +508,154 @@ Several depend on one enabling renderer feature, so build that first if you pick
 - [ ] **Curl-Noise flow field** — color by velocity direction/magnitude, multi-octave noise,
   faster field evolution.
 - [ ] **Strange Attractor** — color by speed/position, trail persistence, multiple attractors.
+
+### Optional — advanced learning route (the theory behind the sim)
+
+Every preset and level in this project quietly stands on a *real* branch of math, physics,
+or CS — you have already been *using* numerical integration, vector calculus, stochastic
+processes, chaos theory, and GPU architecture without formally studying them. This section
+is a **study map** (not a code deliverable) that turns each of those from "a line that
+works" into knowledge you own. It is organized by **theory domain**; for each: what it is,
+**where it already lives in your code**, a picture-first path (video → book), and a
+hands-on exercise. Pick domains in any order — the priority ladder at the end suggests one.
+
+Prerequisites that unlock everything below: **single-variable calculus** (derivative =
+rate of change — you already use `dp/dt`), **basic linear algebra** (vectors, dot product,
+2×2 rotation, eigenvalues), and comfort reading a **first-order ODE** `dx/dt = f(x)`. If any
+feel shaky, MIT OCW **18.01 / 18.06** and 3Blue1Brown's *Essence of Calculus* + *Essence of
+Linear Algebra* are the fastest fills.
+
+#### 1. Numerical methods for ODEs — *how every particle moves*
+
+- **In your code:** the `(ax, ay)` accumulator + **semi-implicit (symplectic) Euler**
+  (v first, then x) in `update_kernel`; the frame-rate-independent `dt`; the attractor's
+  **forward Euler + adaptive substepping** and the `|1 − kh| > 1` blow-up you traced.
+- **Theory:** truncation error & order of a method, **stability** vs step size, explicit
+  vs implicit vs symplectic integrators (why semi-implicit conserves energy and explicit
+  Euler pumps it), Runge–Kutta (RK4), adaptive step control.
+- **Learn:** 3Blue1Brown *Differential Equations* series → *Numerical Recipes* ch. 16, or
+  Hairer, *Solving Ordinary Differential Equations I*. Video: "RK4 explained".
+- **Do:** add an **RK4** integrator option to the Lorenz branch and compare how much larger
+  a step it stays stable at vs your substepped Euler — you'll *see* order-4 accuracy.
+
+#### 2. Vector calculus & field theory — *curl-noise, swirl, potentials*
+
+- **In your code:** `swirl` (a tangential vector field), the curl-noise style's scalar
+  **potential** `ψ(x,y,t)` and its **2-D curl** `(∂ψ/∂y, −∂ψ/∂x)` by finite differences,
+  and the fact that a curl is **divergence-free by construction** (mixed-partials cancel).
+- **Theory:** gradient / divergence / curl and their physical meaning (source-sink vs
+  rotation), scalar & vector potentials, the Helmholtz decomposition, why
+  `div(curl) = 0`, finite-difference approximations of derivatives.
+- **Learn:** 3Blue1Brown *Divergence and curl* + *Grad, div, curl* (Khan Academy
+  multivariable) → Div/Grad/Curl and All That (Schey), or MIT OCW **18.02**.
+- **Do:** visualize `div` and `curl` of your own `ψ` as a color field and confirm the
+  curl-noise flow keeps density uniform (the "invisible swirl" you had to color-code).
+
+#### 3. Dynamical systems & chaos — *the Lorenz butterfly*
+
+- **In your code:** the `lorenz()` velocity field (σ,ρ,β), the strange **attractor**,
+  **sensitive dependence** (seeds smear across the butterfly), **Poincaré–Bendixson**
+  (why 2-D can't be chaotic), and the *manifold* / *fractal-dimension* words.
+- **Theory:** phase space, fixed points & their **eigenvalue stability**, limit cycles,
+  **bifurcations** (period-doubling route to chaos), Lyapunov exponents (the rate of that
+  exponential smearing), strange attractors, **fractal / Hausdorff dimension** (why the
+  Lorenz set is ≈2.06-D).
+- **Learn:** 3Blue1Brown *chaos* + Veritasium *logistic map* → **Strogatz, *Nonlinear
+  Dynamics and Chaos*** (early chapters + the Lorenz chapter — the canonical, accessible
+  text; his Cornell lectures are free on YouTube).
+- **Do:** the two capstone sketches below (logistic bifurcation diagram, Mandelbrot set).
+
+#### 4. Probability & stochastic processes — *smoke, RNG, randomness that looks organic*
+
+- **In your code:** per-particle **`curandState`** (seed / subsequence / offset), smoke's
+  per-frame random kick that integrates into a **random walk / Brownian motion**, and the
+  `/ sqrtf(dt)` fix from "variances add, so spread grows as √steps."
+- **Theory:** pseudo-random generators (XORWOW vs counter-based Philox — ties to L6's
+  bandwidth note), uniform vs normal draws, expectation & **variance**, the random walk →
+  **diffusion equation** limit, why independent white noise ≠ spatially-coherent noise.
+- **Learn:** 3Blue1Brown *Central Limit Theorem* + *But what is a random walk* → any intro
+  probability text (Blitzstein, *Introduction to Probability*, free Harvard Stat110 videos).
+- **Do:** plot the spread of your smoke particles vs time and confirm it grows as **√t**
+  (not `t`); then break the `/sqrtf(dt)` fix and watch the diffusion rate change with FPS.
+
+#### 5. Procedural noise — *coherent fields instead of confetti*
+
+- **In your code:** the curl-noise `ψ` built from drifting sine octaves; the principle that
+  turbulence must be a **smooth field sampled by position**, not per-particle white noise.
+- **Theory:** value vs gradient (**Perlin**) vs **simplex** noise, fractal Brownian motion
+  (summing octaves), and turning any smooth potential into a divergence-free flow
+  ("curl noise", Bridson 2007 — the exact technique your style uses).
+- **Learn:** *The Book of Shaders* (noise chapters) → Perlin's original talks; Bridson,
+  *Curl-Noise for Procedural Fluid Flow* (short, readable paper).
+- **Do:** replace the two-sine `ψ` with real gradient (Perlin) noise + a few **octaves**
+  (FBM) and watch the flow gain multi-scale detail.
+
+#### 6. Parallel computing & GPU architecture — *why 1M is memory-bound*
+
+- **In your code:** SoA vs AoS, **coalesced** access, the **roofline** you measured in L4
+  (Memory 93.9% vs Compute 14.2% = bandwidth-bound), occupancy, warps/SIMT, `__constant__`
+  broadcast memory, CUDA-GL interop.
+- **Theory:** the **roofline model** (arithmetic intensity → compute- vs memory-bound),
+  memory hierarchy & bandwidth, warp divergence, occupancy vs latency hiding, reductions
+  & atomics (needed for P2's "hacker-mode" GPU stat read-back).
+- **Learn:** the NVIDIA **CUDA C++ Programming Guide** + **Best Practices Guide** →
+  *Programming Massively Parallel Processors* (Kirk & Hwu — the standard textbook).
+- **Do:** L7 (FP16 packing) as the *measured* payoff, and add a parallel **reduction** to
+  compute total kinetic energy on-GPU (also the audio-reactive scalar in AUDIO.md).
+
+#### 7. Computer graphics — *how points become pixels*
+
+- **In your code:** the hand-written GL pipeline, **NDC**, point sprites (`gl_PointSize`),
+  the fragment-shader disc, and **alpha vs additive blending** (the `SRC1` typo, the
+  high-density additive plan).
+- **Theory:** the rasterization pipeline, homogeneous/clip coordinates, the blending
+  equation `src·factor + dst·factor`, gamma/linear color, premultiplied alpha.
+- **Learn:** **LearnOpenGL.com** (you've already used its concepts) → *Real-Time Rendering*
+  (Akenine-Möller) for the deep version.
+- **Do:** the per-vertex `size` + additive-blend renderer upgrade listed under per-style
+  polish — then the twinkle / streak effects it unlocks.
+
+#### Capstone exercises (do these — they double as CUDA practice)
+
+Both are **embarrassingly parallel** (every point/pixel independent, no cross-talk) and
+drop straight into your existing GLFW/OpenGL + CUDA framework — ideal self-contained kernels
+that make *fractal*, *bifurcation*, and *attractor* tangible:
+
+- [ ] **Logistic-map bifurcation diagram** *(planned first side-exercise — the cleanest
+  "order → chaos" picture, and a self-contained CUDA + rendering warm-up).* Spec:
+  - **The map:** iterate `x → r·x·(1 − x)` (population dynamics). For a fixed `r`, from
+    almost any start `x₀ ∈ (0,1)`, `x` settles onto an **attractor**: a single fixed point
+    for small `r`, then a 2-cycle, 4-cycle, 8-cycle… (**period-doubling**), then chaos.
+  - **The plot:** x-axis = `r` (sweep ~2.5 → 4.0 across the screen width), y-axis = the
+    settled `x` values. For each `r`: iterate ~1000 steps to discard the **transient**, then
+    plot the next ~200–500 `x` values as points. One column of the image per `r`.
+  - **CUDA shape:** one **thread per `r`-column** — each independently iterates its own `x`
+    and writes its settled points; zero cross-talk, a perfect first parallel kernel. Map `r`
+    → screen x and `x` → screen y into the existing `[x, y, r, g, b]` VBO and reuse the
+    `Renderer` as-is (draw `GL_POINTS`). Do a slow **CPU version first** to verify the shape,
+    then move the per-`r` loop into a kernel.
+  - **What to look for:** the **period-doubling cascade**, the sudden onset of chaos near
+    `r ≈ 3.57`, the **white non-chaotic windows** inside chaos (notably the period-3 window
+    near `r ≈ 3.83`), and **Feigenbaum's constant** δ ≈ 4.669 in the shrinking spacing of
+    successive forks (measure the fork `r`-values and take ratios — a genuinely universal
+    number falling out of your own picture).
+  - **Stretch:** color by local density (how often each `x` is visited), an interactive
+    zoom into one fork, or a live `r`-sweep animation.
+- **Mandelbrot / Julia set** — iterate `z → z² + c` per pixel, color by escape time; zoom
+  into infinite self-similar detail. The canonical fractal. (One thread per pixel.)
+- *(stretch)* **Double pendulum** or a **2-body → 3-body** sim — chaos and sensitive
+  dependence you can feel by nudging initial conditions.
+
+#### Only if you want the formal rigor
+
+The precise definitions behind the vocabulary — **manifold** (a space with locally-flat
+coordinates, like Earth's surface) in differential geometry / topology (Milnor, *Topology
+from the Differentiable Viewpoint*; do Carmo), and **Hausdorff dimension** (why ~2.06-D) in
+measure theory — are graduate-flavored and **not needed** to understand or extend the sim.
+Reach for them only out of curiosity.
+
+**Shortest high-yield path:** shore up the prerequisites → **domain 1 (integration)** and
+**domain 3 (chaos)** since they underpin the most presets → **code the logistic bifurcation
+diagram + Mandelbrot set** (theory becomes a picture *and* CUDA practice) → then branch into
+whichever domain (fields, noise, GPU, graphics) pulls you next. After that, none of the words
+under these presets are vocabulary anymore — they're things you can derive, plot, and tune.
