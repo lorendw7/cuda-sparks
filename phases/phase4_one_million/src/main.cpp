@@ -13,6 +13,16 @@
 #include <chrono>            // high_resolution_clock for the per-frame timing
 #include <cstdlib>           // getenv, atol
 
+// P2a: keep the particle viewport a SQUARE so NDC [-1,1]^2 never stretches (dots stay
+// round on any aspect ratio). GLFW calls this whenever the framebuffer resizes -- window
+// drag, or the F11 fullscreen toggle. width/height are the new size in real pixels.
+void framebuffer_size_callback(GLFWwindow* window, int width, int height)
+{
+    int side = width < height ? width : height; // shorter edge -> the largest square that fits
+    glViewport(0, 0, side, side);               // map NDC onto that square, anchored bottom-left;
+                                                // the leftover strip (right, on landscape) is for the HUD
+}
+
 int main()
 {
     // 1) Start GLFW. Returns 0 on failure.
@@ -46,6 +56,15 @@ int main()
         fprintf(stderr, "gladLoadGL failed.\n");
         return 1;
     }
+
+    // P2a: register the callback (GLFW invokes it on every future resize), then set the
+    // viewport ONCE for the current size -- the callback only fires on CHANGES, so the very
+    // first frame needs a manual call. glfwGetFramebufferSize returns REAL pixels (not the
+    // logical window size), which is what glViewport needs on a HiDPI / scaled 2.5K display.
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    int fbw, fbh;
+    glfwGetFramebufferSize(window, &fbw, &fbh);
+    framebuffer_size_callback(window, fbw, fbh);
 
     // Inner scope: the Renderer must be destroyed (its ~Renderer runs glDelete*)
     // while the GL context is STILL alive. This "}" ends before glfwTerminate(),
@@ -141,6 +160,13 @@ int main()
         int prevSpace = GLFW_RELEASE; // previous-frame Space state, for the RELEASE->PRESS
                                       // edge detection below (same idea as prevState[] for
                                       // the number keys)
+        // P2a fullscreen state. fullscreen = current mode. savedX/Y/W/H remembers the
+        // windowed rectangle so F11 can restore the exact same window on the way back.
+        // prevF11 = edge-detect state (same debounce pattern as the number keys / Space).
+        bool fullscreen = false;
+        int savedX, savedY, savedW, savedH;
+        int prevF11 = GLFW_RELEASE;
+
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
         {
@@ -223,6 +249,33 @@ int main()
             // press, not every frame the key is held (the Space counterpart of the number
             // keys' prevState[k] = now).
             prevSpace = nowSpace;
+            // P2a: F11 toggles windowed <-> fullscreen (edge-detected, one press = one toggle).
+            int nowF11 = glfwGetKey(window, GLFW_KEY_F11);
+            if (nowF11 == GLFW_PRESS && prevF11 == GLFW_RELEASE)
+            {
+                fullscreen = !fullscreen;
+                if (fullscreen)
+                {
+                    // Save the windowed rectangle BEFORE leaving windowed mode, so we can
+                    // restore this exact position + size later.
+                    glfwGetWindowPos(window, &savedX, &savedY);
+                    glfwGetWindowSize(window, &savedW, &savedH);
+                    GLFWmonitor *mon = glfwGetPrimaryMonitor();        // the main display
+                    const GLFWvidmode *mode = glfwGetVideoMode(mon);   // its native resolution + refresh (auto-detected)
+                    // Passing a monitor = exclusive fullscreen at the monitor's native mode.
+                    glfwSetWindowMonitor(window, mon, 0, 0,
+                                         mode->width, mode->height, mode->refreshRate);
+                }
+                else
+                {
+                    // Passing nullptr = back to a windowed window, at the saved rectangle.
+                    glfwSetWindowMonitor(window, nullptr,
+                                         savedX, savedY, savedW, savedH, 0);
+                }
+                glfwSwapInterval(0); // re-assert vsync-off: a monitor switch can reset it (would re-cap FPS at 60)
+                // (the framebuffer-size callback fires on this switch and re-squares the viewport for us)
+            }
+            prevF11 = nowF11; // remember for next frame's edge test
 
             if (maxFrames > 0 && ++frameCount >= maxFrames)
                 glfwSetWindowShouldClose(window, 1); // hit the cap -> exit the loop cleanly

@@ -49,6 +49,12 @@ with the keyboard at any time.
 Turn the fixed 1280×1280 window into a proper fullscreen presentation: a square simulation
 area sized to the screen, with the leftover space used as a hacker-style telemetry HUD.
 
+> **Split by dependency.** The **telemetry HUD** needs to draw text / plots — i.e. Dear
+> ImGui, which only arrives in **P3**. So P2 is built in two halves:
+> **P2a** = fullscreen toggle + square viewport (pure GLFW/OpenGL, no new dependency —
+> **done**), and **P2b** = the telemetry HUD, deferred to land **with P3's ImGui setup**.
+> P2a already leaves the correct leftover strip empty and waiting for P2b.
+
 ### Fullscreen toggle
 
 - `glfwGetPrimaryMonitor` + `glfwGetVideoMode` for the native resolution; toggle
@@ -198,8 +204,13 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
       `(currentPreset + 1) % nBinds`); the number keys still switch presets and drop back to
       manual (sync `currentPreset`, clear `autoPlay`). `currentPreset` boots at 1 to match the
       ctor's `set_preset(1)`. *(Enhancement — randomized order — still open.)*
-- [ ] P2 Fullscreen (F11) + square viewport (`side = min(W,H)`) + hacker-style telemetry
-      strip (perf monitor / live particle info); optional GPU-read-back "hacker-mode" stats
+- [x] **P2a** Fullscreen (F11) + square viewport (`side = min(W,H)`) — `framebuffer_size_callback`
+      re-squares the viewport on every resize/toggle; F11 edge-toggles windowed ↔ exclusive
+      fullscreen via `glfwSetWindowMonitor` (saving/restoring the windowed rect), native
+      resolution auto-detected from `glfwGetVideoMode`. Round dots on any aspect ratio; the
+      leftover strip is left empty for the HUD.
+- [ ] **P2b** Hacker-style telemetry strip (perf monitor / live particle info); optional
+      GPU-read-back "hacker-mode" stats. **Deferred to land with P3's Dear ImGui setup.**
 - [ ] P3 Dear ImGui menu (FetchContent + backends; preset picker + auto-play controls +
       readouts; optional live physics sliders); windowed control-panel vs fullscreen
       telemetry-console layouts sharing one state
