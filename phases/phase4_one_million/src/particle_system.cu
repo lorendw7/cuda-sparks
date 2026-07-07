@@ -974,7 +974,7 @@ ParticleSystem::ParticleSystem(const SimParams &p) // definition of the ctor dec
     int block = 256, grid = (n_ + block - 1) / block;
     init_rng<<<grid, block>>>((curandState *)d_rng_, n_, 1025ULL);
     CUDA_CHECK(cudaGetLastError());
-    init_kernel<<<grid, block>>>(d_, n_, params_.numEmitters, (curandState *)d_rng_); // params_.numEmitters was set by set_preset(0) -> upload_emitter above
+    init_kernel<<<grid, block>>>(d_, n_, params_.numEmitters, (curandState *)d_rng_); // params_.numEmitters was set by set_preset(1) -> upload_emitter above
     CUDA_CHECK(cudaGetLastError());
 
     // L6-2: seed the shell RNG (reuse init_rng, different seed) then init_shells to

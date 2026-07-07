@@ -1,8 +1,9 @@
-// Phase 4 (L2-L5) -- window + GL context, then run the 1M-particle sim each frame.
-// CUDA-GL interop: the kernel writes vertices straight into the VBO (no CPU round
-// trip). Hotkeys switch effect presets: J = Jia (default), 1 = fireworks, 2 = fire,
-// 3 = galaxy, 4 = rain, 5 = smoke, 6 = curl-noise.
-// SPARKS_MAX_FRAMES caps the loop so Nsight application-replay can profile it.
+// Phase 4 (L2-L6 + Presentation P1) -- window + GL context, then run the 1M-particle
+// sim each frame. CUDA-GL interop: the kernel writes vertices straight into the VBO (no
+// CPU round trip). Hotkeys switch effect presets: J = Jia, 1 = fireworks (boot default),
+// 2 = fire, 3 = galaxy, 4 = rain, 5 = smoke, 6 = curl-noise, 7 = strange attractor.
+// P1 auto-play: Space toggles hands-off auto-cycling (advances a preset every ~10 s);
+// any number key drops back to manual. SPARKS_MAX_FRAMES caps the loop for Nsight replay.
 // glad must be included before glfw.
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -51,7 +52,7 @@ int main()
     // so the destructor fires at the right time. (RAII + GL ordering.)
     {
         // Simulation config. {} zero-inits every field first. NOTE: gravity /
-        // nbodyStrength / swirl set here are OVERWRITTEN by set_preset(0) in the
+        // nbodyStrength / swirl set here are OVERWRITTEN by set_preset(1) in the
         // ctor -- presets own those three effect knobs now. Only n / restitution /
         // bound below feed the running sim; params.dt is unused (update() runs on
         // the local dt in the render loop, not params.dt).
@@ -125,6 +126,21 @@ int main()
             GLFW_RELEASE,
         };
 
+        // P1 auto-play state (Presentation track). autoPlay off = manual control (Space
+        // toggles it). presetTimer accumulates real dt in auto mode; when it passes
+        // presetInterval the sim advances to the next preset. currentPreset is the app's
+        // single notion of the active preset, so the auto-cycler, the number keys, and
+        // (later) the ImGui menu all agree on one value.
+        bool autoPlay = false;
+        float presetTimer = 0.0f;
+        int currentPreset = 1; // must match the preset the ctor boots (set_preset(1) =
+                               // fireworks); otherwise the app's notion disagrees with the
+                               // screen and the first auto-cycle would step to fireworks again.
+        const float presetInterval = 10.0f; // seconds each preset holds in auto mode (~8-12)
+
+        int prevSpace = GLFW_RELEASE; // previous-frame Space state, for the RELEASE->PRESS
+                                      // edge detection below (same idea as prevState[] for
+                                      // the number keys)
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
         {
@@ -135,9 +151,26 @@ int main()
             auto t0 = std::chrono::high_resolution_clock::now();
             float dt = std::chrono::duration<float>(t0 - lastTime).count(); // seconds since last frame
             lastTime = t0;                                                  // remember for next frame
-            if (dt > 0.05f)                                                 // clamp a hitch (window drag / breakpoint) so particles don't teleport
+
+            if (dt > 0.05f) // clamp a hitch (window drag / breakpoint) so particles don't teleport
             {
                 dt = 0.05f;
+            }
+
+            // P1: in auto-play, accumulate real frame time and, once a full interval has
+            // elapsed, advance to the next preset (wrapping with % nBinds) and reset the
+            // timer. Uses dt (wall-clock) rather than a frame count, so the interval stays
+            // ~10 s at any FPS. nBinds doubles as the preset count here (one hotkey per
+            // preset); P3 will replace it with a real preset_count() when the menu needs names.
+            if (autoPlay)
+            {
+                presetTimer += dt;
+                if (presetTimer >= presetInterval)
+                {
+                    currentPreset = (currentPreset + 1) % nBinds;
+                    sim.set_preset(currentPreset);
+                    presetTimer = 0.0f;
+                }
             }
 
             sim.update(dt); // map VBO -> kernel writes physics + vertices -> unmap
@@ -171,9 +204,25 @@ int main()
                 if (now == GLFW_PRESS && prevState[k] == GLFW_RELEASE)
                 {
                     sim.set_preset(kBinds[k].preset);
+                    currentPreset = kBinds[k].preset; // P1: keep the app's notion in sync with the manual pick
+                    autoPlay = false;                 // P1: a manual pick drops back to manual so auto never yanks it away
                 }
                 prevState[k] = now;
             }
+
+            // P1: Space toggles auto <-> manual, edge-detected like the number keys so one
+            // physical press = one toggle (not thousands while the key is held). Reset the
+            // timer either way so entering auto starts a fresh interval.
+            int nowSpace = glfwGetKey(window, GLFW_KEY_SPACE);
+            if (nowSpace == GLFW_PRESS && prevSpace == GLFW_RELEASE)
+            {
+                autoPlay = !autoPlay;
+                presetTimer = 0.0f;
+            }
+            // Remember this frame's Space state so the edge test fires once per physical
+            // press, not every frame the key is held (the Space counterpart of the number
+            // keys' prevState[k] = now).
+            prevSpace = nowSpace;
 
             if (maxFrames > 0 && ++frameCount >= maxFrames)
                 glfwSetWindowShouldClose(window, 1); // hit the cap -> exit the loop cleanly

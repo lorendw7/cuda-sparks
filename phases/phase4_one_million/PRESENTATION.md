@@ -160,6 +160,20 @@ Not just show/hide — the two modes present differently, over one shared state:
   *presentation* differs. Reuse **one** "draw ImGui" function that branches on the
   fullscreen flag rather than duplicating widget code.
 
+### Refactor: one shared "switch preset" path
+
+By P3 there are **three** things that change the active preset — the number-key handler,
+the auto-play cycler, and now a menu click — and each must do the *same* bookkeeping:
+call `sim.set_preset(i)`, update `currentPreset`, and (for a manual pick) set
+`autoPlay = false`. P1 duplicates that logic across the keyboard loop and the cycler; a
+menu button would be a third copy. **Extract it into one small helper** — a
+`selectPreset(int i, bool manual)` lambda/function that keyboard, menu, and auto-play all
+call — so the three input sources can never disagree about `currentPreset` / `autoPlay`
+(e.g. forgetting to drop out of auto on one path). Do this refactor *when adding the menu*,
+not before: with only two callers in P1 the duplication is cheap and premature extraction
+adds indirection for no gain; the third caller (the menu) is what makes one shared path
+clearly worth it.
+
 *Deliverable:* a mouse-driven menu in windowed mode and a telemetry console in fullscreen,
 both reading and writing the same sim state, so keyboard, menu, and auto-play never
 disagree.
@@ -179,8 +193,11 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
 
 ## Progress
 
-- [ ] P1 Auto-play + manual toggle (`autoPlay` / `presetTimer`, Space toggles, number keys
-      drop back to manual)
+- [x] P1 Auto-play + manual toggle — `autoPlay` / `presetTimer` / `currentPreset` state;
+      Space edge-toggles auto ↔ manual (advances a preset every `presetInterval` ≈ 10 s via
+      `(currentPreset + 1) % nBinds`); the number keys still switch presets and drop back to
+      manual (sync `currentPreset`, clear `autoPlay`). `currentPreset` boots at 1 to match the
+      ctor's `set_preset(1)`. *(Enhancement — randomized order — still open.)*
 - [ ] P2 Fullscreen (F11) + square viewport (`side = min(W,H)`) + hacker-style telemetry
       strip (perf monitor / live particle info); optional GPU-read-back "hacker-mode" stats
 - [ ] P3 Dear ImGui menu (FetchContent + backends; preset picker + auto-play controls +
