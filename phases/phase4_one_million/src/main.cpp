@@ -12,11 +12,14 @@
 #include "particle_system.h" // the 1M-particle GPU simulation
 #include <chrono>            // high_resolution_clock for the per-frame timing
 #include <cstdlib>           // getenv, atol
+#include "imgui.h"
+#include "backends/imgui_impl_glfw.h"
+#include "backends/imgui_impl_opengl3.h"
 
 // P2a: keep the particle viewport a SQUARE so NDC [-1,1]^2 never stretches (dots stay
 // round on any aspect ratio). GLFW calls this whenever the framebuffer resizes -- window
 // drag, or the F11 fullscreen toggle. width/height are the new size in real pixels.
-void framebuffer_size_callback(GLFWwindow* window, int width, int height)
+void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
     int side = width < height ? width : height; // shorter edge -> the largest square that fits
     glViewport(0, 0, side, side);               // map NDC onto that square, anchored bottom-left;
@@ -104,6 +107,13 @@ int main()
         renderer.init(sim.size());
         sim.register_vbo(renderer.vbo());
 
+        // P3: bring up Dear ImGui on our live GLFW + OpenGL3 context. Init here (inside the
+        // GL-context scope) so shutdown can also run before the context is destroyed.
+        IMGUI_CHECKVERSION();                       // header vs linked-lib version guard
+        ImGui::CreateContext();                     // the global UI state lives here
+        ImGui_ImplGlfw_InitForOpenGL(window, true); // input backend; true = install + chain GLFW callbacks
+        ImGui_ImplOpenGL3_Init("#version 330");     // render backend; GLSL version matches our GL 3.3
+
         auto lastTime = std::chrono::high_resolution_clock::now(); // previous-frame timestamp, for real dt
 
         double accUpdate = 0.0;                                      // sim update ms, summed over the current second
@@ -152,9 +162,9 @@ int main()
         // (later) the ImGui menu all agree on one value.
         bool autoPlay = false;
         float presetTimer = 0.0f;
-        int currentPreset = 1; // must match the preset the ctor boots (set_preset(1) =
-                               // fireworks); otherwise the app's notion disagrees with the
-                               // screen and the first auto-cycle would step to fireworks again.
+        int currentPreset = 1;              // must match the preset the ctor boots (set_preset(1) =
+                                            // fireworks); otherwise the app's notion disagrees with the
+                                            // screen and the first auto-cycle would step to fireworks again.
         const float presetInterval = 10.0f; // seconds each preset holds in auto mode (~8-12)
 
         int prevSpace = GLFW_RELEASE; // previous-frame Space state, for the RELEASE->PRESS
@@ -183,6 +193,16 @@ int main()
                 dt = 0.05f;
             }
 
+            // P3: open a new ImGui frame. Everything declared between NewFrame() and
+            // Render() (below) is THIS frame's UI -- immediate mode rebuilds it every frame.
+            ImGui_ImplOpenGL3_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+
+            ImGui::Begin("cuda-sparks");    // a floating panel (the title is also its unique ID)
+            ImGui::Text("ImGui is alive!"); // P3-1 pipeline test -- replaced by real controls in P3-2
+            ImGui::End();
+
             // P1: in auto-play, accumulate real frame time and, once a full interval has
             // elapsed, advance to the next preset (wrapping with % nBinds) and reset the
             // timer. Uses dt (wall-clock) rather than a frame count, so the interval stays
@@ -210,6 +230,12 @@ int main()
             glClear(GL_COLOR_BUFFER_BIT);            // clear the back buffer
 
             renderer.draw(); // draw every particle as a point (count = sim.size())
+
+            // P3: turn this frame's UI into draw data and paint it with OpenGL -- AFTER the
+            // particles (menu on top), BEFORE SwapBuffers. ImGui uses its own full-window
+            // projection, so it ignores P2a's square glViewport and can cover the whole window.
+            ImGui::Render();
+            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
             glfwSwapBuffers(window); // present the frame
             glfwPollEvents();        // handle close/keyboard events
@@ -260,8 +286,8 @@ int main()
                     // restore this exact position + size later.
                     glfwGetWindowPos(window, &savedX, &savedY);
                     glfwGetWindowSize(window, &savedW, &savedH);
-                    GLFWmonitor *mon = glfwGetPrimaryMonitor();        // the main display
-                    const GLFWvidmode *mode = glfwGetVideoMode(mon);   // its native resolution + refresh (auto-detected)
+                    GLFWmonitor *mon = glfwGetPrimaryMonitor();      // the main display
+                    const GLFWvidmode *mode = glfwGetVideoMode(mon); // its native resolution + refresh (auto-detected)
                     // Passing a monitor = exclusive fullscreen at the monitor's native mode.
                     glfwSetWindowMonitor(window, mon, 0, 0,
                                          mode->width, mode->height, mode->refreshRate);
@@ -289,7 +315,14 @@ int main()
                 frames = 0;
                 lastReport = t1;
             }
+
         }
+
+        // P3: tear down ImGui ONCE, after the loop, while the GL context is still alive
+        // (reverse order of init; the same GL-context-ordering rule as ~Renderer below).
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
     } // <- renderer destroyed here, GL context still alive
 
     // 6) Tear down the context AFTER the renderer is gone.

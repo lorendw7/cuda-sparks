@@ -211,6 +211,14 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
       leftover strip is left empty for the HUD.
 - [ ] **P2b** Hacker-style telemetry strip (perf monitor / live particle info); optional
       GPU-read-back "hacker-mode" stats. **Deferred to land with P3's Dear ImGui setup.**
-- [ ] P3 Dear ImGui menu (FetchContent + backends; preset picker + auto-play controls +
-      readouts; optional live physics sliders); windowed control-panel vs fullscreen
-      telemetry-console layouts sharing one state
+- [ ] P3 Dear ImGui menu — built in sub-steps:
+  - [x] **P3-1** ImGui wired up — FetchContent pulls Dear ImGui; a small static `imgui`
+        library compiles its core + the GLFW/OpenGL3 backends; init/NewFrame/Render/Shutdown
+        integrated into the loop (shutdown inside the GL-context scope). A test panel renders
+        over the particles, confirming the pipeline.
+  - [ ] **P3-2** Preset picker panel (a button per preset, active one highlighted)
+  - [ ] **P3-3** Auto-play controls (checkbox + interval slider, shared with P1 state)
+  - [ ] **P3-4** Readouts (FPS, particle count); wires into P2b's telemetry HUD
+  - [ ] **P3-5** Extract a shared `selectPreset(i, manual)` + gate hotkeys on
+        `io.WantCaptureKeyboard`; *(stretch)* live physics sliders. Windowed control-panel vs
+        fullscreen telemetry-console layouts sharing one state.

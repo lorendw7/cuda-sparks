@@ -8,7 +8,8 @@ add_executable(phase4
     src/particle_system.cu
 )
 
-target_link_libraries(phase4 PRIVATE glfw glad_gl_core)
+target_link_libraries(phase4 PRIVATE glfw glad_gl_core imgui)
+
 
 target_include_directories(phase4 PRIVATE
     ${CMAKE_SOURCE_DIR}/include

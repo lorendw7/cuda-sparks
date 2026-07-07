@@ -47,6 +47,33 @@ FetchContent_MakeAvailable(glad)
 # Generate a static glad library for OpenGL 3.3 Core.
 glad_add_library(glad_gl_core STATIC API gl:core=3.3)
 
+# --- Dear ImGui: immediate-mode GUI (P3 menu). Not CMake-native, so FetchContent
+#     only downloads it; we compile its core + the GLFW/OpenGL3 backends ourselves. ---
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.91.5
+)
+FetchContent_MakeAvailable(imgui)   # no CMakeLists in imgui -> this just downloads it
+
+add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(imgui PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+target_link_libraries(imgui PUBLIC glfw)
+if (WIN32)
+    target_link_libraries(imgui PUBLIC opengl32)   # the GL3 backend's loader uses wglGetProcAddress
+endif()
+
+
 # ---------------------------------------------------------------------------
 # Phases
 # ---------------------------------------------------------------------------
