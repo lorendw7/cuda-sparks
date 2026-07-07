@@ -122,11 +122,12 @@ int main()
         io.Fonts->AddFontFromFileTTF(SPARKS_ASSET_DIR "/fonts/Roboto-Medium.ttf", 22.0f);
         io.FontGlobalScale = 1.0f; // 1.0 -- the font is rasterized at the right size already
 
+        // P3: soften the default look -- rounded corners + roomier padding/spacing.
         ImGuiStyle &style = ImGui::GetStyle();
-        style.FrameRounding = 4.0f;
-        style.WindowRounding = 6.0f;
-        style.FramePadding = ImVec2(10, 6);
-        style.ItemSpacing = ImVec2(8, 6);
+        style.FrameRounding = 4.0f;   // button/checkbox corner radius
+        style.WindowRounding = 6.0f;  // panel corner radius
+        style.FramePadding = ImVec2(10, 6); // space inside buttons
+        style.ItemSpacing = ImVec2(8, 6);   // space between widgets
 
         auto lastTime = std::chrono::high_resolution_clock::now(); // previous-frame timestamp, for real dt
 
@@ -185,7 +186,7 @@ int main()
         int currentPreset = 1;              // must match the preset the ctor boots (set_preset(1) =
                                             // fireworks); otherwise the app's notion disagrees with the
                                             // screen and the first auto-cycle would step to fireworks again.
-        const float presetInterval = 10.0f; // seconds each preset holds in auto mode (~8-12)
+        float presetInterval = 10.0f; // seconds each preset holds in auto mode (~8-12)
 
         int prevSpace = GLFW_RELEASE; // previous-frame Space state, for the RELEASE->PRESS
                                       // edge detection below (same idea as prevState[] for
@@ -273,6 +274,21 @@ int main()
                     if (active)
                         ImGui::PopStyleColor(2); // pop the 2 colors pushed above
                 }
+
+                // P3-3: auto-play controls, bound directly to the P1 state. The checkbox
+                // reads/writes the SAME `autoPlay` that Space toggles, so both always agree
+                // (immediate mode re-reads the live value each frame -- no manual sync). It
+                // returns true the frame it's clicked, so we reset the timer then (like Space).
+                ImGui::Separator();
+                if (ImGui::Checkbox("Auto-play", &autoPlay))
+                {
+                    presetTimer = 0.0f;
+                }
+                // The slider edits `presetInterval` in place (it needed the `const` dropped);
+                // the auto-cycler reads it live, so dragging changes the cycle speed at once.
+                ImGui::SetNextItemWidth(200.0f);
+                ImGui::SliderFloat("Interval (s)", &presetInterval, 3.0f, 60.0f, "%.1f");
+
                 ImGui::End();
             }
 

@@ -223,7 +223,11 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
         laid out with `SameLine`. Crisp text from a bundled **Roboto** TTF (loaded via a
         CMake `SPARKS_ASSET_DIR` macro; Cousine kept for the P2b HUD). **H** toggles the whole
         menu so the effect can be viewed unobstructed.
-  - [ ] **P3-3** Auto-play controls (checkbox + interval slider, shared with P1 state)
+  - [x] **P3-3** Auto-play controls — an `ImGui::Checkbox` bound to `&autoPlay` (stays in
+        sync with the Space toggle automatically, since immediate mode re-reads the live
+        value) and an `ImGui::SliderFloat` editing `presetInterval` in place (dropped its
+        `const`); resets `presetTimer` on toggle, like Space. Plus a light global style pass
+        (rounded corners, padding).
   - [ ] **P3-4** Readouts (FPS, particle count); wires into P2b's telemetry HUD
   - [ ] **P3-5** Extract a shared `selectPreset(i, manual)` + gate hotkeys on
         `io.WantCaptureKeyboard`; *(stretch)* live physics sliders. Windowed control-panel vs
