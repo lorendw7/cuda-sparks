@@ -114,6 +114,20 @@ int main()
         ImGui_ImplGlfw_InitForOpenGL(window, true); // input backend; true = install + chain GLFW callbacks
         ImGui_ImplOpenGL3_Init("#version 330");     // render backend; GLSL version matches our GL 3.3
 
+        // P3: load a crisp 22px TTF instead of scaling the tiny built-in bitmap font.
+        // SPARKS_ASSET_DIR (a CMake -D macro holding the assets ABSOLUTE path) is
+        // string-literal-concatenated with the filename, so the font loads regardless of
+        // the working directory. The first font added becomes the default.
+        ImGuiIO &io = ImGui::GetIO();
+        io.Fonts->AddFontFromFileTTF(SPARKS_ASSET_DIR "/fonts/Roboto-Medium.ttf", 22.0f);
+        io.FontGlobalScale = 1.0f; // 1.0 -- the font is rasterized at the right size already
+
+        ImGuiStyle &style = ImGui::GetStyle();
+        style.FrameRounding = 4.0f;
+        style.WindowRounding = 6.0f;
+        style.FramePadding = ImVec2(10, 6);
+        style.ItemSpacing = ImVec2(8, 6);
+
         auto lastTime = std::chrono::high_resolution_clock::now(); // previous-frame timestamp, for real dt
 
         double accUpdate = 0.0;                                      // sim update ms, summed over the current second
@@ -155,6 +169,12 @@ int main()
             GLFW_RELEASE,
         };
 
+        // P3-2: button labels for the preset picker. Indexed by preset id (0..nBinds-1),
+        // same order as the presets[] table in particle_system.cu.
+        const char *presetNames[] = {
+            "Jia", "Fireworks", "Fire", "Galaxy",
+            "Rain", "Smoke", "Curl-Noise", "Attractor"};
+
         // P1 auto-play state (Presentation track). autoPlay off = manual control (Space
         // toggles it). presetTimer accumulates real dt in auto mode; when it passes
         // presetInterval the sim advances to the next preset. currentPreset is the app's
@@ -177,6 +197,11 @@ int main()
         int savedX, savedY, savedW, savedH;
         int prevF11 = GLFW_RELEASE;
 
+        // P3-2: H toggles the whole menu on/off so you can watch the effect unobstructed
+        // (the panel is an opaque overlay). showUI = visible; prevH = edge-detect state.
+        bool showUI = true;
+        int prevH = GLFW_RELEASE;
+
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
         {
@@ -193,15 +218,63 @@ int main()
                 dt = 0.05f;
             }
 
+            // P3-2: H toggles menu visibility (edge-detected). NewFrame/Render still run
+            // every frame below -- only the panel's Begin/End is gated on showUI -- so a
+            // hidden frame just declares no windows (an empty UI layer), not a missing frame.
+            int nowH = glfwGetKey(window, GLFW_KEY_H);
+            if (nowH == GLFW_PRESS && prevH == GLFW_RELEASE)
+            {
+                showUI = !showUI;
+            }
+            prevH = nowH;
+
             // P3: open a new ImGui frame. Everything declared between NewFrame() and
             // Render() (below) is THIS frame's UI -- immediate mode rebuilds it every frame.
             ImGui_ImplOpenGL3_NewFrame();
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
 
-            ImGui::Begin("cuda-sparks");    // a floating panel (the title is also its unique ID)
-            ImGui::Text("ImGui is alive!"); // P3-1 pipeline test -- replaced by real controls in P3-2
-            ImGui::End();
+            // P3-2: preset picker. One button per preset, rebuilt every frame (immediate
+            // mode). The ACTIVE preset (currentPreset) is drawn gold-on-black; clicking a
+            // button is a manual pick, so it does the same trio as the number keys.
+            // Pin the panel as a full-width bar at the top: position (0,0), width =
+            // io.DisplaySize.x, height 0 = auto-fit. ImGuiCond_Always re-applies it every
+            // frame so it can't be dragged away; NoMove/NoResize lock it in place.
+            ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, 0), ImGuiCond_Always);
+            if (showUI)
+            {
+                ImGui::Begin("cuda-sparks", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+                ImGui::Text("Preset");
+                for (int i = 0; i < nBinds; ++i)
+                {
+                    bool active = (i == currentPreset);
+                    if (active)
+                    {
+                        // Highlight the active button: gold background + black text. Two Push =
+                        // two Pop below (the color stack must stay balanced or the color leaks).
+                        ImGui::PushStyleColor(ImGuiCol_Button,
+                                              ImVec4(1.0f, 0.84f, 0.0f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 1.0f)); // black text
+                    }
+
+                    if (i > 0)
+                    {
+                        ImGui::SameLine(); // lay the buttons out in a row (a top toolbar), not stacked
+                    }
+
+                    if (ImGui::Button(presetNames[i])) // true only on the frame it's clicked
+                    {
+                        sim.set_preset(i); // switch the look
+                        currentPreset = i; // keep the app's notion in sync
+                        autoPlay = false;  // a manual pick drops back to manual
+                    }
+
+                    if (active)
+                        ImGui::PopStyleColor(2); // pop the 2 colors pushed above
+                }
+                ImGui::End();
+            }
 
             // P1: in auto-play, accumulate real frame time and, once a full interval has
             // elapsed, advance to the next preset (wrapping with % nBinds) and reset the
@@ -315,7 +388,6 @@ int main()
                 frames = 0;
                 lastReport = t1;
             }
-
         }
 
         // P3: tear down ImGui ONCE, after the loop, while the GL context is still alive

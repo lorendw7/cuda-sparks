@@ -216,7 +216,13 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
         library compiles its core + the GLFW/OpenGL3 backends; init/NewFrame/Render/Shutdown
         integrated into the loop (shutdown inside the GL-context scope). A test panel renders
         over the particles, confirming the pipeline.
-  - [ ] **P3-2** Preset picker panel (a button per preset, active one highlighted)
+  - [x] **P3-2** Preset picker panel — a full-width top bar with a button per preset
+        (`presetNames[]`), the active one gold-highlighted; a click is a manual pick (same
+        trio as the number keys: `set_preset` + sync `currentPreset` + clear `autoPlay`).
+        Pinned top via `SetNextWindowPos/Size(ImGuiCond_Always)` + `NoMove/NoResize`, buttons
+        laid out with `SameLine`. Crisp text from a bundled **Roboto** TTF (loaded via a
+        CMake `SPARKS_ASSET_DIR` macro; Cousine kept for the P2b HUD). **H** toggles the whole
+        menu so the effect can be viewed unobstructed.
   - [ ] **P3-3** Auto-play controls (checkbox + interval slider, shared with P1 state)
   - [ ] **P3-4** Readouts (FPS, particle count); wires into P2b's telemetry HUD
   - [ ] **P3-5** Extract a shared `selectPreset(i, manual)` + gate hotkeys on
