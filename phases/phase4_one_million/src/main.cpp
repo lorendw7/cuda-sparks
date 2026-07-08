@@ -1,9 +1,11 @@
-// Phase 4 (L2-L6 + Presentation P1) -- window + GL context, then run the 1M-particle
+// Phase 4 (L2-L6 + Presentation P1-P3) -- window + GL context, then run the 1M-particle
 // sim each frame. CUDA-GL interop: the kernel writes vertices straight into the VBO (no
 // CPU round trip). Hotkeys switch effect presets: J = Jia, 1 = fireworks (boot default),
 // 2 = fire, 3 = galaxy, 4 = rain, 5 = smoke, 6 = curl-noise, 7 = strange attractor.
-// P1 auto-play: Space toggles hands-off auto-cycling (advances a preset every ~10 s);
-// any number key drops back to manual. SPARKS_MAX_FRAMES caps the loop for Nsight replay.
+// Presentation shell: Space toggles hands-off auto-cycling (advances a preset every ~10 s,
+// any number key drops back to manual); F11 toggles fullscreen (square sim + a two-panel
+// telemetry console over the leftover strip; windowed shows one control bar instead);
+// H hides the Dear ImGui menu. SPARKS_MAX_FRAMES caps the loop for Nsight replay.
 // glad must be included before glfw.
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
@@ -15,6 +17,7 @@
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
+#include "hud_log.h"
 
 // P2a: keep the particle viewport a SQUARE so NDC [-1,1]^2 never stretches (dots stay
 // round on any aspect ratio). GLFW calls this whenever the framebuffer resizes -- window
@@ -39,15 +42,36 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE); // create the window HIDDEN -- position it below, THEN show
+                                              // it, so it never flashes at GLFW's default spot first
 
-    // 3) Create a 1280x1280 window. nullptr window means creation failed.
-    GLFWwindow *window = glfwCreateWindow(1280, 1280, "cuda-sparks | Phase 4",
-                                          nullptr, nullptr);
-    if (window == nullptr)
+    // P2a+: size and place the window on the primary monitor's WORK AREA (the desktop minus
+    // the taskbar), so it always fits and centers on any screen. Query the monitor BEFORE
+    // creating the window -- monitor functions don't need a window to exist.
+    GLFWmonitor *mon = glfwGetPrimaryMonitor();
+    int mx, my, mw, mh;
+    glfwGetMonitorWorkarea(mon, &mx, &my, &mw, &mh); // work area: origin (mx,my) + size (mw,mh)
+    const int margin = 80;                           // breathing room so the window never touches the edges
+    int side = 1280;                                 // desired square edge (matches P2a's square viewport)
+    int maxSide = (mw < mh ? mw : mh) - margin;      // largest square the work area can hold
+    if (side > maxSide)                              // only shrink when the screen is too small to fit 1280
+    {
+        side = maxSide;
+    }
+
+    // 3) Create the window at the computed square size. nullptr window means creation failed.
+    GLFWwindow *window = glfwCreateWindow(side, side, "cuda-sparks | Phase 4", nullptr, nullptr);
+
+    if (window == nullptr) // validate the handle BEFORE using it -- the calls below would crash on NULL
     {
         glfwTerminate();
         return 1;
     }
+
+    // Window is known-good: center it on the work area, then reveal it (it was created hidden).
+    glfwSetWindowPos(window, mx + (mw - side) / 2, // horizontal center (side <= mw -> never negative)
+                     my + (mh - side) / 2);        // vertical center
+    glfwShowWindow(window);                        // now show it -> no flash at GLFW's default position
 
     // 4) Make the window's GL context current, disable vsync (uncapped FPS).
     glfwMakeContextCurrent(window);
@@ -187,6 +211,9 @@ int main()
                                       // fireworks); otherwise the app's notion disagrees with the
                                       // screen and the first auto-cycle would step to fireworks again.
         float presetInterval = 10.0f; // seconds each preset holds in auto mode (~8-12)
+        HudLog hud;
+        float logTimer = 0.0f;
+        int logSeq = 0;
 
         int prevSpace = GLFW_RELEASE; // previous-frame Space state, for the RELEASE->PRESS
                                       // edge detection below (same idea as prevState[] for
@@ -218,8 +245,8 @@ int main()
         // resets the timer itself at the call site, since we don't reset it here).
         auto selectPreset = [&](int i, bool manual)
         {
-            sim.set_preset(i);  // upload the preset's emitters + physics
-            currentPreset = i;  // keep the app's single notion of the active preset in sync
+            sim.set_preset(i); // upload the preset's emitters + physics
+            currentPreset = i; // keep the app's single notion of the active preset in sync
             if (manual)
             {
                 autoPlay = false;   // manual pick drops back to manual
@@ -241,6 +268,50 @@ int main()
             if (dt > 0.05f) // clamp a hitch (window drag / breakpoint) so particles don't teleport
             {
                 dt = 0.05f;
+            }
+
+            // P2b: throttle -- emit ONE log line per interval, NOT per frame. At 3000 FPS a
+            // per-frame push would fill the 128-line buffer in a single instant. The interval
+            // is pure PACING (scroll speed), not performance: bigger = calmer, smaller = busier.
+            logTimer += dt;      // accumulate real frame time
+            if (logTimer >= 0.3) // ...once a full interval has passed (~1.6 lines/sec here)
+            {
+                logTimer = 0.0f;                               // reset -> wait another full interval before the next line
+                const ImU32 green = IM_COL32(0, 255, 65, 255); // classic terminal green
+                int blocks = (sim.size() + 255) / 256;         // ceil(n/256): grid size for a 256-thread block
+
+                // Rotate through 4 telemetry templates -- one per emit. logSeq (bumped just
+                // AFTER the switch) walks 0->1->2->3->0..., so the stream reads varied, not
+                // one repeated line. Each case needs its own { } -- case labels share one
+                // scope, so a local declared bare in one case clashes with the next.
+                switch (logSeq % 4)
+                {
+                case 0: // GPU: kernel launch config + this frame's cost
+                {
+                    hud.push(green, "[GPU] KERNEL update<<<%d,256>>>  n=%d  %.2fms", blocks, sim.size(), uiMs);
+                    break;
+                }
+                case 1: // MEM: vertex bytes streamed to the VBO this frame (5 floats x 4 bytes each)
+                {
+                    float mem = sim.size() * 20 / 1.0e6; // total bytes / 1e6 -> MB (1.0e6 forces a float divide)
+                    hud.push(green, "[VBO] %d verts %.2f MB/frame", sim.size(), mem);
+                    break;
+                }
+                case 2: // SIM: active preset, frame rate, running frame index
+                {
+                    hud.push(green, "[SIM] preset Name: %s  fps: %.0f frame number: %ld", presetNames[currentPreset], uiFps, frameCount);
+                    break;
+                }
+                case 3: // SIM: physics step size + static config knobs
+                {
+                    hud.push(green, "[SIM] dt=%.4fs  shells=%d  bound=%.1f",
+                             dt, params.numShells, params.bound);
+                    break;
+                }
+                default:
+                    break;
+                }
+                logSeq++; // advance so the NEXT emit picks the next template (wraps via % 4)
             }
 
             // P3-4: refresh the readout snapshot only every 0.5 s (throttle) so the digits
@@ -268,17 +339,22 @@ int main()
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
 
-            // P3-2: preset picker. One button per preset, rebuilt every frame (immediate
-            // mode). The ACTIVE preset (currentPreset) is drawn gold-on-black; clicking a
-            // button is a manual pick, so it does the same trio as the number keys.
-            // Pin the panel as a full-width bar at the top: position (0,0), width =
-            // io.DisplaySize.x, height 0 = auto-fit. ImGuiCond_Always re-applies it every
-            // frame so it can't be dragged away; NoMove/NoResize lock it in place.
-            ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, 0), ImGuiCond_Always);
-            if (showUI)
+            // P2b/P3 layout geometry, recomputed each frame (the framebuffer_size_callback's
+            // `side` is a dead local by now). io.DisplaySize == the framebuffer size in px,
+            // kept live by the ImGui backend, so these stay correct across an F11 toggle.
+            const float W = io.DisplaySize.x; // framebuffer width  (px)
+            const float H = io.DisplaySize.y; // framebuffer height (px)
+            const float sq = W < H ? W : H;   // square sim edge = shorter side (same formula as the callback)
+            const bool landscape = (W >= H);  // wide screen? true -> HUD strip on the right, false -> below
+
+            // ── UI content, extracted into 3 lambdas so BOTH layouts (windowed top-bar and
+            //    the fullscreen side panels) call ONE copy of each widget group -- no dup.
+            //    [&] captures main's state by reference, same mechanism as selectPreset. ──
+
+            // Content 1: preset picker. horizontal=true -> one row (top bar); false -> stacked
+            // (the narrow fullscreen strip, where 8 buttons in a row would overflow and clip).
+            auto drawPresetPicker = [&](bool horizontal)
             {
-                ImGui::Begin("cuda-sparks", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
                 ImGui::Text("Preset");
                 for (int i = 0; i < nBinds; ++i)
                 {
@@ -292,9 +368,9 @@ int main()
                         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 1.0f)); // black text
                     }
 
-                    if (i > 0)
-                    {
-                        ImGui::SameLine(); // lay the buttons out in a row (a top toolbar), not stacked
+                    if (horizontal && i > 0) // horizontal -> SameLine packs buttons into a row;
+                    {                        // else (stacked) each button drops to its own line
+                        ImGui::SameLine();
                     }
 
                     if (ImGui::Button(presetNames[i])) // true only on the frame it's clicked
@@ -305,12 +381,11 @@ int main()
                     if (active)
                         ImGui::PopStyleColor(2); // pop the 2 colors pushed above
                 }
+            };
 
-                // P3-3: auto-play controls, bound directly to the P1 state. The checkbox
-                // reads/writes the SAME `autoPlay` that Space toggles, so both always agree
-                // (immediate mode re-reads the live value each frame -- no manual sync). It
-                // returns true the frame it's clicked, so we reset the timer then (like Space).
-                ImGui::Separator();
+            // Content 2: auto-play controls (checkbox + interval slider), bound to the P1 state.
+            auto drawAutoPlay = [&]
+            {
                 if (ImGui::Checkbox("Auto-play", &autoPlay))
                 {
                     presetTimer = 0.0f;
@@ -319,33 +394,95 @@ int main()
                 // the auto-cycler reads it live, so dragging changes the cycle speed at once.
                 ImGui::SetNextItemWidth(200.0f);
                 ImGui::SliderFloat("Interval (s)", &presetInterval, 3.0f, 60.0f, "%.1f");
+            };
 
-                // P3-4: live readouts (groundwork for the P2b telemetry HUD). FPS/ms use
-                // the throttled snapshot; count and preset name change only on action, so
-                // they don't flicker and can read the live values directly.
-                ImGui::Separator();
+            // Content 3: live readouts (FPS / particle count / active preset name).
+            auto drawReadouts = [&]
+            {
                 ImGui::Text("FPS: %.0f (%.2f ms)", uiFps, uiMs);
                 ImGui::Text("Particles: %d", sim.size());
                 ImGui::Text("Preset %s", presetNames[currentPreset]);
+            };
 
+            // P3/P2b layout branch -- one shared UI state rendered three ways:
+            //   hidden (H)         -> no windows this frame
+            //   windowed (default) -> the full-width control bar pinned below
+            //   fullscreen (F11)   -> a two-panel console over the leftover strip
+            // All three reuse the drawXxx() lambdas above, so each widget exists in one copy.
+            // The next two lines pin the WINDOWED bar (pos (0,0), width = full display,
+            // height 0 = auto-fit); ImGuiCond_Always + NoMove/NoResize keep it from drifting.
+            ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, 0), ImGuiCond_Always);
+            if (!showUI)
+            {
+                // H hid the menu -> declare no windows this frame (NewFrame/Render still run).
+            }
+            else if (!fullscreen)
+            {
+                ImGui::Begin("cuda-sparks", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+                drawPresetPicker(true);
+                ImGui::Separator();
+                drawAutoPlay();
+                ImGui::Separator();
+                drawReadouts();
+                ImGui::Separator();
+                hud.draw();
                 ImGui::End();
+            }
+            else
+            {
+                // FULLSCREEN: the square sim sits on one edge (P2a); the leftover strip becomes
+                // a two-panel hacker console. Strip rect derived from the square edge `sq`:
+                // landscape -> right band (full height); portrait -> bottom band (full width).
+                const float stripX = landscape ? sq : 0.0f;
+                const float stripY = landscape ? 0.0f : sq;
+                const float stripW = landscape ? (W - sq) : sq;
+                const float stripH = landscape ? sq : (H - sq);
+                const float halfH = stripH * 0.5f;
+
+                // Console skin: near-black bg + terminal-green text, shared by both panels.
+                // 2 pushes here -> 2 pops after the second End() (the color stack must balance).
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.02f, 0.02f, 0.02f, 0.95f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.25f, 1.0f));
+
+                // Top half: PERF MONITOR -- the fast-moving readouts.
+                ImGui::SetNextWindowPos(ImVec2(stripX, stripY), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(stripW, halfH), ImGuiCond_Always);
+                ImGui::Begin("PERF MONITOR", nullptr,
+                             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                            ImGuiWindowFlags_NoCollapse);
+                drawReadouts();
+                ImGui::End();
+
+                // Bottom half: PARTICLE INFO -- controls fold in here + the scrolling log.
+                ImGui::SetNextWindowPos(ImVec2(stripX, stripY + halfH), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(stripW, halfH), ImGuiCond_Always);
+                ImGui::Begin("PARTICLE INFO", nullptr,
+                             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+                drawPresetPicker(false);
+                ImGui::Separator();
+                drawAutoPlay();
+                ImGui::Separator();
+                hud.draw();
+                ImGui::End();
+
+                ImGui::PopStyleColor(2);
             }
 
             // P1: in auto-play, accumulate real frame time and, once a full interval has
             // elapsed, advance to the next preset (wrapping with % nBinds) and reset the
             // timer. Uses dt (wall-clock) rather than a frame count, so the interval stays
-            // ~10 s at any FPS. nBinds doubles as the preset count here (one hotkey per
-            // preset); P3 will replace it with a real preset_count() when the menu needs names.
+            // ~10 s at any FPS. nBinds doubles as the preset count (one hotkey per preset).
             if (autoPlay)
             {
                 presetTimer += dt;
                 if (presetTimer >= presetInterval)
                 {
                     selectPreset((currentPreset + 1) % nBinds, false); // manual=false: stay in auto
-                    presetTimer = 0.0f; // REQUIRED: selectPreset only resets the timer for a
-                                        // manual pick, so the auto path must clear it here --
-                                        // else presetTimer stays >= interval and it re-switches
-                                        // every frame (runaway).
+                    presetTimer = 0.0f;                                // REQUIRED: selectPreset only resets the timer for a
+                                                                       // manual pick, so the auto path must clear it here --
+                                                                       // else presetTimer stays >= interval and it re-switches
+                                                                       // every frame (runaway).
                 }
             }
 

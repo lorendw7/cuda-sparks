@@ -209,10 +209,15 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
       fullscreen via `glfwSetWindowMonitor` (saving/restoring the windowed rect), native
       resolution auto-detected from `glfwGetVideoMode`. Round dots on any aspect ratio; the
       leftover strip is left empty for the HUD.
-- [ ] **P2b** Hacker-style telemetry strip (perf monitor / live particle info); optional
-      GPU-read-back "hacker-mode" stats. **Deferred to land with P3's Dear ImGui setup.**
-- [x] P3 Dear ImGui menu — built in sub-steps (core done; live physics sliders + the
-      windowed-vs-fullscreen split remain optional / fold into P2b):
+- [x] **P2b** Hacker-style telemetry strip — in fullscreen (F11) the leftover band beside the
+      square sim splits into two pinned panels: **PERF MONITOR** (FPS / frame-ms / particle
+      count) on top, **PARTICLE INFO** (preset picker + auto-play + a green-on-black scrolling
+      `HudLog` ring buffer) below. Near-black bg + terminal-green text via a shared
+      `PushStyleColor` pair; strip rect derived from the square edge `sq` (right band on
+      landscape, bottom band on portrait). *(Optional GPU-read-back "hacker-mode" stats + a
+      `PlotLines` FPS sparkline still open.)*
+- [x] P3 Dear ImGui menu — built in sub-steps (core + the windowed-vs-fullscreen layout split
+      now done; live physics sliders remain the one optional stretch):
   - [x] **P3-1** ImGui wired up — FetchContent pulls Dear ImGui; a small static `imgui`
         library compiles its core + the GLFW/OpenGL3 backends; init/NewFrame/Render/Shutdown
         integrated into the loop (shutdown inside the GL-context scope). A test panel renders
@@ -238,5 +243,9 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
         (`manual=false`), and the menu (`manual=true`), so the `set_preset`+`currentPreset`
         +`autoPlay` trio lives in one place. Number-key hotkeys gated on
         `!io.WantCaptureKeyboard` so a keystroke for the UI doesn't also switch presets.
-        *(Still optional: live physics sliders; the windowed-vs-fullscreen layout split,
-        which folds into P2b.)*
+  - [x] **P3-6** Windowed/fullscreen layout split — the per-frame UI branches on the
+        `fullscreen` flag over one shared state: windowed = a top control bar; fullscreen =
+        the P2b two-panel console. The three widget groups (preset picker / auto-play /
+        readouts) are extracted into `[&]` lambdas so both layouts call one copy each; the
+        picker takes a `horizontal` flag (a row in the bar, stacked in the narrow strip).
+        **H** hides all of it. *(Still optional: live physics sliders.)*

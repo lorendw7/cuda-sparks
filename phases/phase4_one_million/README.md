@@ -475,8 +475,10 @@ tracks.)*
 
 ### Application tracks (layered on the finished sim — separate docs)
 
-- [ ] Presentation & UX — see **[PRESENTATION.md](PRESENTATION.md)** (auto-play +
-      manual toggle, fullscreen square viewport + telemetry HUD, Dear ImGui menu). After L6.
+- [x] Presentation & UX — see **[PRESENTATION.md](PRESENTATION.md)** (auto-play + manual
+      toggle, fullscreen square viewport + two-panel telemetry HUD, Dear ImGui menu). Core
+      P1–P3 shipped; only optional stretches remain (randomized order, live physics sliders,
+      GPU-read-back stats).
 - [ ] Audio — see **[AUDIO.md](AUDIO.md)** (procedural event SFX → ambient beds →
       audio-reactive). After Presentation. (Was "Phase 5" in the roadmap.)
 
