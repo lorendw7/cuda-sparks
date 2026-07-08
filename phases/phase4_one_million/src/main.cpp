@@ -210,6 +210,23 @@ int main()
         float uiMs = 0.0f;
         auto lastUiTime = std::chrono::high_resolution_clock::now();
 
+        // P3-5: ONE shared "switch preset" path for the keyboard, the auto-cycler, and the
+        // menu, so they can never disagree about currentPreset / autoPlay. A lambda (not a
+        // free function) because it needs main's locals -- [&] captures them by reference so
+        // it can write them. manual=true = a human picked it -> leave auto-play (and reset
+        // the timer); manual=false = the auto-cycler advancing, which stays in auto (and
+        // resets the timer itself at the call site, since we don't reset it here).
+        auto selectPreset = [&](int i, bool manual)
+        {
+            sim.set_preset(i);  // upload the preset's emitters + physics
+            currentPreset = i;  // keep the app's single notion of the active preset in sync
+            if (manual)
+            {
+                autoPlay = false;   // manual pick drops back to manual
+                presetTimer = 0.0f; // and starts a fresh interval
+            }
+        };
+
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
         {
@@ -282,9 +299,7 @@ int main()
 
                     if (ImGui::Button(presetNames[i])) // true only on the frame it's clicked
                     {
-                        sim.set_preset(i); // switch the look
-                        currentPreset = i; // keep the app's notion in sync
-                        autoPlay = false;  // a manual pick drops back to manual
+                        selectPreset(i, true);
                     }
 
                     if (active)
@@ -326,9 +341,11 @@ int main()
                 presetTimer += dt;
                 if (presetTimer >= presetInterval)
                 {
-                    currentPreset = (currentPreset + 1) % nBinds;
-                    sim.set_preset(currentPreset);
-                    presetTimer = 0.0f;
+                    selectPreset((currentPreset + 1) % nBinds, false); // manual=false: stay in auto
+                    presetTimer = 0.0f; // REQUIRED: selectPreset only resets the timer for a
+                                        // manual pick, so the auto path must clear it here --
+                                        // else presetTimer stays >= interval and it re-switches
+                                        // every frame (runaway).
                 }
             }
 
@@ -363,16 +380,19 @@ int main()
             // preset's emitters + physics; existing particles adopt the new look only as
             // they recycle, so it fades in over ~1 lifetime. GLFW_KEY_* is the PHYSICAL
             // key, independent of Shift / Caps Lock -- so J is naturally case-insensitive.
-            for (int k = 0; k < nBinds; ++k)
+            // P3-5: stand down while ImGui wants the keyboard (a widget focused / text
+            // input), so a keystroke meant for the UI doesn't ALSO fire a preset hotkey.
+            if (!io.WantCaptureKeyboard)
             {
-                int now = glfwGetKey(window, kBinds[k].key);
-                if (now == GLFW_PRESS && prevState[k] == GLFW_RELEASE)
+                for (int k = 0; k < nBinds; ++k)
                 {
-                    sim.set_preset(kBinds[k].preset);
-                    currentPreset = kBinds[k].preset; // P1: keep the app's notion in sync with the manual pick
-                    autoPlay = false;                 // P1: a manual pick drops back to manual so auto never yanks it away
+                    int now = glfwGetKey(window, kBinds[k].key);
+                    if (now == GLFW_PRESS && prevState[k] == GLFW_RELEASE)
+                    {
+                        selectPreset(kBinds[k].preset, true);
+                    }
+                    prevState[k] = now;
                 }
-                prevState[k] = now;
             }
 
             // P1: Space toggles auto <-> manual, edge-detected like the number keys so one

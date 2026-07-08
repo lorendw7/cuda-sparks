@@ -211,7 +211,8 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
       leftover strip is left empty for the HUD.
 - [ ] **P2b** Hacker-style telemetry strip (perf monitor / live particle info); optional
       GPU-read-back "hacker-mode" stats. **Deferred to land with P3's Dear ImGui setup.**
-- [ ] P3 Dear ImGui menu — built in sub-steps:
+- [x] P3 Dear ImGui menu — built in sub-steps (core done; live physics sliders + the
+      windowed-vs-fullscreen split remain optional / fold into P2b):
   - [x] **P3-1** ImGui wired up — FetchContent pulls Dear ImGui; a small static `imgui`
         library compiles its core + the GLFW/OpenGL3 backends; init/NewFrame/Render/Shutdown
         integrated into the loop (shutdown inside the GL-context scope). A test panel renders
@@ -232,6 +233,10 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
         active preset name. FPS/ms use `io.Framerate` **throttled** to a 0.5 s snapshot
         (`uiFps`/`uiMs`) so the digits are legible at thousands of FPS; count/preset read
         live (they only change on action). Groundwork for the P2b telemetry HUD.
-  - [ ] **P3-5** Extract a shared `selectPreset(i, manual)` + gate hotkeys on
-        `io.WantCaptureKeyboard`; *(stretch)* live physics sliders. Windowed control-panel vs
-        fullscreen telemetry-console layouts sharing one state.
+  - [x] **P3-5** Shared preset path + input hygiene — a `selectPreset(i, manual)` lambda
+        (`[&]`-capturing main's state) now used by the keyboard, the auto-cycler
+        (`manual=false`), and the menu (`manual=true`), so the `set_preset`+`currentPreset`
+        +`autoPlay` trio lives in one place. Number-key hotkeys gated on
+        `!io.WantCaptureKeyboard` so a keystroke for the UI doesn't also switch presets.
+        *(Still optional: live physics sliders; the windowed-vs-fullscreen layout split,
+        which folds into P2b.)*
