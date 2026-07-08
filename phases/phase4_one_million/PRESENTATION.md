@@ -228,7 +228,10 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
         value) and an `ImGui::SliderFloat` editing `presetInterval` in place (dropped its
         `const`); resets `presetTimer` on toggle, like Space. Plus a light global style pass
         (rounded corners, padding).
-  - [ ] **P3-4** Readouts (FPS, particle count); wires into P2b's telemetry HUD
+  - [x] **P3-4** Readouts — `ImGui::Text` lines for FPS + frame-ms, particle count, and the
+        active preset name. FPS/ms use `io.Framerate` **throttled** to a 0.5 s snapshot
+        (`uiFps`/`uiMs`) so the digits are legible at thousands of FPS; count/preset read
+        live (they only change on action). Groundwork for the P2b telemetry HUD.
   - [ ] **P3-5** Extract a shared `selectPreset(i, manual)` + gate hotkeys on
         `io.WantCaptureKeyboard`; *(stretch)* live physics sliders. Windowed control-panel vs
         fullscreen telemetry-console layouts sharing one state.

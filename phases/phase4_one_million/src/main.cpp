@@ -124,8 +124,8 @@ int main()
 
         // P3: soften the default look -- rounded corners + roomier padding/spacing.
         ImGuiStyle &style = ImGui::GetStyle();
-        style.FrameRounding = 4.0f;   // button/checkbox corner radius
-        style.WindowRounding = 6.0f;  // panel corner radius
+        style.FrameRounding = 4.0f;         // button/checkbox corner radius
+        style.WindowRounding = 6.0f;        // panel corner radius
         style.FramePadding = ImVec2(10, 6); // space inside buttons
         style.ItemSpacing = ImVec2(8, 6);   // space between widgets
 
@@ -183,9 +183,9 @@ int main()
         // (later) the ImGui menu all agree on one value.
         bool autoPlay = false;
         float presetTimer = 0.0f;
-        int currentPreset = 1;              // must match the preset the ctor boots (set_preset(1) =
-                                            // fireworks); otherwise the app's notion disagrees with the
-                                            // screen and the first auto-cycle would step to fireworks again.
+        int currentPreset = 1;        // must match the preset the ctor boots (set_preset(1) =
+                                      // fireworks); otherwise the app's notion disagrees with the
+                                      // screen and the first auto-cycle would step to fireworks again.
         float presetInterval = 10.0f; // seconds each preset holds in auto mode (~8-12)
 
         int prevSpace = GLFW_RELEASE; // previous-frame Space state, for the RELEASE->PRESS
@@ -203,6 +203,13 @@ int main()
         bool showUI = true;
         int prevH = GLFW_RELEASE;
 
+        // P3-4: throttled readout snapshot. io.Framerate updates every frame, so at
+        // thousands of FPS the digits flicker unreadably; we sample it into uiFps/uiMs
+        // twice a second and display the held copy. lastUiTime = last sample time.
+        float uiFps = 0.0f;
+        float uiMs = 0.0f;
+        auto lastUiTime = std::chrono::high_resolution_clock::now();
+
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
         {
@@ -217,6 +224,15 @@ int main()
             if (dt > 0.05f) // clamp a hitch (window drag / breakpoint) so particles don't teleport
             {
                 dt = 0.05f;
+            }
+
+            // P3-4: refresh the readout snapshot only every 0.5 s (throttle) so the digits
+            // are legible. Same timer pattern as the once-per-second printf below.
+            if (std::chrono::duration<double>(t0 - lastUiTime).count() > 0.5)
+            {
+                uiFps = io.Framerate;
+                uiMs = 1000.0f / io.Framerate;
+                lastUiTime = t0;
             }
 
             // P3-2: H toggles menu visibility (edge-detected). NewFrame/Render still run
@@ -288,6 +304,14 @@ int main()
                 // the auto-cycler reads it live, so dragging changes the cycle speed at once.
                 ImGui::SetNextItemWidth(200.0f);
                 ImGui::SliderFloat("Interval (s)", &presetInterval, 3.0f, 60.0f, "%.1f");
+
+                // P3-4: live readouts (groundwork for the P2b telemetry HUD). FPS/ms use
+                // the throttled snapshot; count and preset name change only on action, so
+                // they don't flicker and can read the live values directly.
+                ImGui::Separator();
+                ImGui::Text("FPS: %.0f (%.2f ms)", uiFps, uiMs);
+                ImGui::Text("Particles: %d", sim.size());
+                ImGui::Text("Preset %s", presetNames[currentPreset]);
 
                 ImGui::End();
             }
