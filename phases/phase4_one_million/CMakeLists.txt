@@ -6,6 +6,7 @@ add_executable(phase4
     src/main.cpp
     src/renderer.cpp
     src/particle_system.cu
+    src/audio.cpp
 )
 
 target_link_libraries(phase4 PRIVATE glfw glad_gl_core imgui)
@@ -13,6 +14,7 @@ target_link_libraries(phase4 PRIVATE glfw glad_gl_core imgui)
 target_include_directories(phase4 PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+     ${miniaudio_SOURCE_DIR}
 )
 
 # Bake the assets directory's ABSOLUTE path into the binary as a string macro, so

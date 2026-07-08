@@ -91,6 +91,42 @@ the GPU sim and the audio are one instrument.
 
 ---
 
+## Per-preset sound design *(T2 planning — record intentions here as they're decided)*
+
+The T2 bed for each preset should be **derived from that preset's look**, not chosen at
+random. Read the visual on four axes and map each to a sound axis:
+
+| Read the visual | Maps to sound |
+| --- | --- |
+| **Motion** — sparse bursts vs. continuous flow | one-shot hits (chime/crackle) vs. a **sustained drone/pad** |
+| **Energy** — violent vs. gentle | loud/aggressive vs. soft, low level |
+| **Colour temperature** — cold/hard vs. warm/soft | bright, buzzy (saw, open filter) vs. **warm** (sine/triangle, low-pass) |
+| **Signature motion** — swirl, fall, explosion… | a matching modulation (rotating pan, downward glide, noise burst) |
+
+### 0 — Jia *(decided)*
+
+Two slow diagonal jets (pink + gold) braided by a gentle counter-clockwise swirl; no
+gravity, long life, low speed → **continuous, warm, meditative**, not percussive.
+
+**Bed: a warm, slowly-rotating two-voice drone.**
+
+- **Two sine oscillators** — one per jet (pink / gold); a soft interval (e.g. root + fifth).
+- **Detune them a few Hz** so they **beat** ("waah…waah…") — the acoustic image of the two
+  ribbons winding around each other.
+- **Slow pan LFO** (~5–10 s period) drifts the whole sound between L and R — the audible
+  form of the swirl vortex.
+- **Low-pass filter** to keep it warm (matches pink/gold), no bright harmonics; optionally a
+  very slow amplitude LFO for a breathing swell that suits the long particle life.
+
+Building blocks to synthesize later: oscillator, detune → beating, LFO, low-pass filter.
+
+### 1–7 — *(to sketch as T2 is built)*
+
+fireworks → sparse crackle · fire/smoke → low roar · galaxy (n-body) → airy drone ·
+rain → continuous white-noise hiss · Lorenz → drifting, slowly-swelling tone.
+
+---
+
 ## Progress
 
 - [ ] T1 Event SFX — synthesized chime (preset switch) + whoosh (launch); mute + volume in

@@ -18,6 +18,7 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 #include "hud_log.h"
+#include "audio.h"           // Phase 4 audio track: playback device + synthesized tone
 
 // P2a: keep the particle viewport a SQUARE so NDC [-1,1]^2 never stretches (dots stay
 // round on any aspect ratio). GLFW calls this whenever the framebuffer resizes -- window
@@ -253,6 +254,17 @@ int main()
                 presetTimer = 0.0f; // and starts a fresh interval
             }
         };
+
+        // Audio track: open + start the playback device BEFORE the render loop, so the
+        // synthesized tone plays for the loop's whole lifetime. Independent of the GL context,
+        // but bracketed around the loop here (with audio_shutdown after it) for clarity.
+        // NON-FATAL on failure -- unlike glfwInit above, a missing/held audio device just
+        // means "run silently", so we warn and carry on instead of returning.
+        if (!audio_init())
+        {
+            fprintf(stderr, "audio init failed -- running without sound.\n");
+        }
+        
 
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
@@ -586,6 +598,9 @@ int main()
                 lastReport = t1;
             }
         }
+
+        // Audio track: stop + release the device after the loop (mirror of audio_init above).
+        audio_shutdown();
 
         // P3: tear down ImGui ONCE, after the loop, while the GL context is still alive
         // (reverse order of init; the same GL-context-ordering rule as ~Renderer below).

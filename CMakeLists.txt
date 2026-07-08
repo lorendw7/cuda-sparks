@@ -73,6 +73,18 @@ if (WIN32)
     target_link_libraries(imgui PUBLIC opengl32)   # the GL3 backend's loader uses wglGetProcAddress
 endif()
 
+# --- miniaudio: single-header audio library (playback device + callback). Like imgui it
+#     ships no CMake, so FetchContent only DOWNLOADS it. Unlike imgui it has no .cpp files:
+#     the whole implementation lives inside miniaudio.h and is compiled into our own
+#     src/audio.cpp via `#define MINIAUDIO_IMPLEMENTATION`. So there is deliberately NO
+#     add_library here -- miniaudio is just a header; phase4 includes it directly (the
+#     header path ${miniaudio_SOURCE_DIR} is added to phase4's include dirs in its CMake). ---
+FetchContent_Declare(
+    miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG        0.11.21          # pin a release tag, never a branch, for reproducible builds
+)
+FetchContent_MakeAvailable(miniaudio)   # no CMakeLists in miniaudio -> this just downloads it
 
 # ---------------------------------------------------------------------------
 # Phases
