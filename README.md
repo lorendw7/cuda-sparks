@@ -2,15 +2,18 @@
 
 Build a real-time GPU particle system from scratch — and learn CUDA along the way.
 
-We go in five phases, from a pure-CPU baseline through **1,000,000 particles** running smoothly on
-the GPU and on to procedurally-generated, audio-reactive sound. Each phase has a working program you
-can run, and the parts where the real learning happens are left for **you** to write. The framework
-(windowing, OpenGL rendering, build system, timing) is provided so you can focus on the compute.
+We go in four phases, from a pure-CPU baseline through **1,000,000 particles** running smoothly on
+the GPU. The final phase then grows that simulation into a polished, shippable demo — with a
+menu / fullscreen presentation shell and procedurally-generated, audio-reactive sound. Each phase
+has a working program you can run, and the parts where the real learning happens are left for
+**you** to write. The framework (windowing, OpenGL rendering, build system, timing) is provided so
+you can focus on the compute.
 
 > **How the teaching works**
 > - All docs (READMEs, references) and code comments are English-only (ASCII).
 > - Three tracks are taught together as you go: **C++**, **CUDA**, and **OpenGL** (shaders + the
->   render pipeline) — the rendering layer is not a black box.
+>   render pipeline) — the rendering layer is not a black box. A fourth track, **audio**, joins in
+>   Phase 4.
 > - **You write the code.** Early phases leave the core logic (the CPU update loop, the CUDA
 >   kernels) for you; from Phase 3 on you write essentially everything. The framework is explained
 >   as you go.
@@ -24,18 +27,23 @@ can run, and the parts where the real learning happens are left for **you** to w
 | **1 — CPU Baseline** | 10,000 particles on the CPU, rendered with OpenGL | C++ sim loop, OpenGL points, frame timing, a reference benchmark | `ParticleSystem::update()` on the CPU |
 | **2 — CUDA Migration** | Move the physics to a GPU kernel | `cudaMalloc` / `cudaMemcpy`, thread indexing, `curandState` RNG, your first speedup | the update **kernel** + init **kernel** |
 | **3 — Effects** | Gravity, collisions, color fade by lifetime | `__shared__` memory, tiling, `__syncthreads()` | force & interaction kernels |
-| **4 — One Million** | 1,000,000 particles at interactive frame rates | CUDA–OpenGL interop, profiling with **Nsight**, memory-layout (SoA) optimization | the optimized pipeline, **the rendering layer from scratch**, and a presentation shell (menu / fullscreen / auto-play) |
-| **5 — Audio** | Procedurally-generated, audio-reactive sound | real-time audio with miniaudio, code-synthesized SFX, driving sound from live sim state | the audio layer (event → ambient → reactive) |
+| **4 — One Million** | 1,000,000 particles at interactive frame rates, then a full demo | CUDA–OpenGL interop, profiling with **Nsight**, memory-layout (SoA) optimization | the optimized pipeline, **the rendering layer from scratch**, plus two application tracks (below) |
 
 Phase 1 is in [`phases/phase1_cpu_baseline/`](phases/phase1_cpu_baseline/). Each later phase appears
 as you finish the one before it.
 
-> **Where the later work lives.** The **presentation/UX shell** and the **audio layer** both
-> *extend the same Phase-4 application* (one `main.cpp` / renderer / sim), so rather than fork new
-> phase folders they are built into `phase4_one_million/src/` and planned in their own docs there:
-> [`PRESENTATION.md`](phases/phase4_one_million/PRESENTATION.md) (menu, fullscreen, auto-play) and
-> [`AUDIO.md`](phases/phase4_one_million/AUDIO.md) (the Phase-5 audio track). Phase 4's
-> [`README.md`](phases/phase4_one_million/README.md) stays the CUDA/performance spine (L1–L7).
+> **Phase 4 is where it all comes together.** Its CUDA / performance spine (levels **L1–L7**) gets
+> the 1M sim running fast. Two further **application tracks** then layer onto that *same*
+> `phase4_one_million/src/` codebase (one `main.cpp` / renderer / sim — no forked phase folders)
+> and are planned in their own docs:
+>
+> - [`PRESENTATION.md`](phases/phase4_one_million/PRESENTATION.md) — a Dear ImGui menu, real
+>   fullscreen mode, a scrolling telemetry HUD, and a hands-off auto-play loop.
+> - [`AUDIO.md`](phases/phase4_one_million/AUDIO.md) — the **audio track**: procedural,
+>   zero-license sound driven by live simulation state (this was "Phase 5" in an earlier plan, now
+>   folded in as a track on the same app).
+>
+> Phase 4's [`README.md`](phases/phase4_one_million/README.md) stays the CUDA/performance spine.
 >
 > **New here? Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) first** — it maps how every piece
 > fits together and exactly which code is yours to write vs. provided plumbing.
@@ -117,7 +125,7 @@ cuda-sparks/
     └── phase4_one_million/
         ├── README.md          ← CUDA / performance spine: levels L1–L7 (read first)
         ├── PRESENTATION.md    ← app track: menu / fullscreen / auto-play (after L6)
-        ├── AUDIO.md           ← app track: procedural, audio-reactive sound (the Phase-5 layer)
+        ├── AUDIO.md           ← app track: procedural, audio-reactive sound (last)
         ├── CMakeLists.txt
         └── src/               ← one codebase for the sim + both app tracks
             ├── main.cpp           ← window + main loop + preset keys + timing
