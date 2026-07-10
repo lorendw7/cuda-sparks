@@ -103,32 +103,68 @@ random. Read the visual on four axes and map each to a sound axis:
 | **Colour temperature** — cold/hard vs. warm/soft | bright, buzzy (saw, open filter) vs. **warm** (sine/triangle, low-pass) |
 | **Signature motion** — swirl, fall, explosion… | a matching modulation (rotating pan, downward glide, noise burst) |
 
-### 0 — Jia *(decided)*
+### 0 — Jia *(decided — option D: music-box over a drone)*
 
 Two slow diagonal jets (pink + gold) braided by a gentle counter-clockwise swirl; no
-gravity, long life, low speed → **continuous, warm, meditative**, not percussive.
+gravity, long life, low speed → **continuous, warm, meditative**, not percussive. Jia is
+named for a person, so it gets the most-considered, most-memorable treatment.
 
-**Bed: a warm, slowly-rotating two-voice drone.**
+**Bed: a quiet warm drone with a sparse pentatonic music-box melody drifting over it.**
 
-- **Two sine oscillators** — one per jet (pink / gold); a soft interval (e.g. root + fifth).
-- **Detune them a few Hz** so they **beat** ("waah…waah…") — the acoustic image of the two
-  ribbons winding around each other.
-- **Slow pan LFO** (~5–10 s period) drifts the whole sound between L and R — the audible
-  form of the swirl vortex.
-- **Low-pass filter** to keep it warm (matches pink/gold), no bright harmonics; optionally a
-  very slow amplitude LFO for a breathing swell that suits the long particle life.
+*Two layers:*
 
-Building blocks to synthesize later: oscillator, detune → beating, LFO, low-pass filter.
+**Layer 1 — the drone (the base, = a minimal version of the "warm beating drone"):**
 
-### 1–7 — *(to sketch as T2 is built)*
+- **Two sine oscillators** — one per jet (pink / gold); a soft interval (e.g. root + fifth),
+  **detuned a few Hz** so they **beat** ("waah…waah…") = the two ribbons winding around
+  each other. Kept **quiet** — it's a bed under the melody, not the star.
+- **Slow pan LFO** (~5–10 s) drifts it between L and R = the audible form of the swirl.
+- **Low-pass filter** for warmth (matches pink/gold, no bright harmonics).
 
-fireworks → sparse crackle · fire/smoke → low roar · galaxy (n-body) → airy drone ·
-rain → continuous white-noise hiss · Lorenz → drifting, slowly-swelling tone.
+**Layer 2 — the music box (what makes it option D):**
+
+- A **sparse melody of enveloped-sine "ding" bells** from a **pentatonic scale** (5-note,
+  no semitones → every note consonant, never sour; ideal for algorithmic/random note pick).
+- Notes are **triggered slowly** (one every ~1–3 s), the pitch chosen randomly from the
+  scale; tie the trigger to the **swirl phase** so the melody breathes with the rotation.
+- Each bell is one sine through a fast-attack / slow-decay **envelope (ADSR-ish)** so it
+  "dings" and rings out — the enveloping is exactly what turns a flat tone into a bell/pluck.
+
+Building blocks to synthesize later: oscillator, detune → beating, LFO, low-pass filter,
+**envelope (attack/decay)**, and a **tiny note sequencer** (a timer that fires a bell and
+picks a pentatonic pitch). Layers 1 (T2 bed) + 2 (event-triggered) share the same output.
+
+### 1–7 — *(optimized designs; detail during T2)*
+
+Same visual→sound method as Jia. Rule of thumb: **episodic looks (discrete events) get
+percussive / burst sounds; continuous looks get a sustained bed + slow modulation.**
+
+- **1 Fireworks** *(episodic → event-driven, ties to T1)* — silence in the dark gap, then per
+  shell: a low **"thump"** on launch (short enveloped low sine) + a **crackle** on burst
+  (band-passed noise burst, fast decay, a few random pops). Reactive scalar = live-shell count.
+- **2 Fire** *(continuous)* — a **low roar**: brown/low-passed noise + slow random amplitude
+  **flicker** + a very low **sub rumble**; occasional crackle pops. Warm.
+- **3 Galaxy** *(continuous)* — an **airy, cold drone** (deliberate contrast to Jia's warmth):
+  detuned high sines forming a thin pad + a deep **sub** for cosmic depth + slow swirl-panning.
+- **4 Rain** *(continuous)* — a **hiss**: band-passed white/pink noise tuned to a rain band +
+  slight stereo spread + occasional low resonant **"drip"**; the wind-slant nudges the pan.
+- **5 Smoke** *(continuous)* — a **soft breath**: low-passed noise, quieter/duller than fire
+  (no crackle), very slow swell, filter cutoff **rising over time** = smoke lifting.
+- **6 Curl-Noise** *(continuous)* — a **morphing pad**: a detuned drone with a slow filter /
+  resonance sweep driven by **LFOs at incommensurate periods**, so it **never repeats** —
+  the audible echo of the field's organic, non-repeating swirls.
+- **7 Lorenz attractor** *(chaotic → the natural T3 pick)* — a **drifting tone** whose **pitch**
+  tracks the attractor's jumps between its two lobes (sample-and-hold-ish glide) + a slow
+  swell. Best driven directly by the live sim scalar → sonified chaos.
 
 ---
 
 ## Progress
 
+- [x] **T0 Foundation** — miniaudio playback device + a continuous 440 Hz test sine
+      (phase accumulation) in `audio.{h,cpp}`; `audio_init` / `audio_shutdown` bracket main's
+      render loop (init is non-fatal — runs silently if no device). The "audio Hello World":
+      proves the OS audio path device → thread → callback → samples → speakers.
 - [ ] T1 Event SFX — synthesized chime (preset switch) + whoosh (launch); mute + volume in
       the menu
 - [ ] T2 Ambient beds — one synthesized loop per preset, cross-fade on preset change

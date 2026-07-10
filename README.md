@@ -123,7 +123,9 @@ cuda-sparks/
             ├── main.cpp           ← window + main loop + preset keys + timing
             ├── renderer.h/.cpp    ← YOUR work: hand-written GL point renderer (RAII class)
             ├── particle_system.h  ← host-side class interface (SoA + interop)
-            └── particle_system.cu ← YOUR work: 1M SoA sim, CUDA-GL interop, emitters/presets
+            ├── particle_system.cu ← YOUR work: 1M SoA sim, CUDA-GL interop, emitters/presets
+            ├── hud_log.h          ← Presentation track: scrolling telemetry console
+            └── audio.h/.cpp       ← Audio track: miniaudio playback device + synthesized sound
 ```
 
 ---

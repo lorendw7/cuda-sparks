@@ -97,10 +97,12 @@ Phase 2 (CUDA)  ✅ L1 kernel + memory  ✅ L2 curand  ✅ L3 measure speedup
 Phase 3         ✅ L1 gravity well  ✅ L2 naive N-body (O(n^2))  ✅ L3 __shared__ tiling
                 ✅ L4 multiple emitters (__constant__)  ✅ L5 effect presets (keys 1/2/3/4)  — complete
 Phase 4         ✅ L1 scale to 1M + measure  ✅ L2 CUDA–OpenGL interop  ✅ L3 SoA  ✅ L4 Nsight
-                ✅ L5 effects/presets from scratch   ▶ L6 realistic sim (next)   ○ L7 FP16 (optional)
-                + app tracks on the same binary: Presentation (menu/fullscreen/auto-play) → Audio
-Phase 5         ·  audio (procedural: event SFX → ambient beds → audio-reactive) — built into the
-                   Phase-4 app as a track; plan in phases/phase4_one_million/AUDIO.md
+                ✅ L5 effects/presets from scratch   ▶ L6 realistic sim (shell fireworks + rain +
+                smoke + curl-noise + Lorenz done; only optional per-style polish left)   ○ L7 FP16
+                + app tracks on the same binary: ✅ Presentation (menu/fullscreen/auto-play)  ▶ Audio
+Phase 5         ▶  audio (procedural: event SFX → ambient beds → audio-reactive) — built into the
+                   Phase-4 app as a track; ✅ T0 foundation done (miniaudio device + 440 Hz test
+                   sine); next T1 event SFX. Plan in phases/phase4_one_million/AUDIO.md
 ```
 
 The project's learning arc is **five phases** (CPU → CUDA → effects → one million → audio). The last

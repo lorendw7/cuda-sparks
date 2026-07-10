@@ -481,6 +481,15 @@ tracks.)*
       GPU-read-back stats).
 - [ ] Audio — see **[AUDIO.md](AUDIO.md)** (procedural event SFX → ambient beds →
       audio-reactive). After Presentation. (Was "Phase 5" in the roadmap.)
+  - [x] **T0 foundation** — miniaudio playback device + a continuous **440 Hz test sine**
+        (phase accumulation on the audio thread) in `audio.{h,cpp}`, with
+        `audio_init` / `audio_shutdown` bracketing the render loop (non-fatal: the sim runs
+        silently if no device opens). Proves the OS audio path end-to-end (the "audio Hello
+        World"). Sound design for all 8 presets is recorded in AUDIO.md — **Jia = a sparse
+        pentatonic music-box melody over a warm drone.**
+  - [ ] T1 event SFX — preset-switch chime + launch whoosh, mute / volume in the menu
+        (upgrades the plain `static` state to an `AudioEngine` with `std::atomic` controls).
+  - [ ] T2 ambient beds · [ ] T3 audio-reactive (sim scalar drives the sound).
 
 ### Per-style advanced polish (OPTIONAL — LAST, after Presentation & Audio)
 
