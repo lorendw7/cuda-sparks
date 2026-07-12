@@ -97,7 +97,8 @@ cuda-sparks/
 │   └── cuda_utils.h           ← CUDA_CHECK macro and gpu_info() (used from Phase 2)
 ├── docs/
 │   ├── ARCHITECTURE.md       ← how it all fits + who writes what (read first)
-│   └── cuda_reference.md     ← CUDA syntax quick reference
+│   ├── cuda_reference.md     ← CUDA syntax quick reference
+│   └── MATH.md               ← optional: the math/theory behind every preset (study map)
 └── phases/
     ├── phase1_cpu_baseline/
     │   ├── README.md          ← the lesson: read this first

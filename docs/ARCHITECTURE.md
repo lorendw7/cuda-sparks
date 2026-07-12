@@ -99,16 +99,17 @@ Phase 3         ✅ L1 gravity well  ✅ L2 naive N-body (O(n^2))  ✅ L3 __shar
 Phase 4         ✅ L1 scale to 1M + measure  ✅ L2 CUDA–OpenGL interop  ✅ L3 SoA  ✅ L4 Nsight
                 ✅ L5 effects/presets from scratch   ▶ L6 realistic sim (shell fireworks + rain +
                 smoke + curl-noise + Lorenz done; only optional per-style polish left)   ○ L7 FP16
-                + app tracks on the same binary: ✅ Presentation (menu/fullscreen/auto-play)  ▶ Audio
-Phase 5         ▶  audio (procedural: event SFX → ambient beds → audio-reactive) — built into the
-                   Phase-4 app as a track; ✅ T0 foundation done (miniaudio device + 440 Hz test
-                   sine); next T1 event SFX. Plan in phases/phase4_one_million/AUDIO.md
+  app tracks    ✅ Presentation (menu/fullscreen/auto-play)   ▶ Audio (procedural: event SFX →
+  (same binary)    ambient beds → audio-reactive; ✅ T0 device + test sine, ▶ T1 event SFX
+                   (preset-switch chime working) — plan in phases/phase4_one_million/AUDIO.md)
 ```
 
-The project's learning arc is **five phases** (CPU → CUDA → effects → one million → audio). The last
-two pieces — the presentation/UX shell and the audio layer — extend the *same* Phase-4 program, so
-their code lives in `phase4_one_million/src/` and their plans in that folder's `PRESENTATION.md` /
-`AUDIO.md` rather than in separate phase folders.
+The project's learning arc is **four phases** (CPU → CUDA → effects → one million). The final phase
+then grows into a shippable demo via two **application tracks** — a presentation/UX shell and an
+audio layer — that extend the *same* Phase-4 program, so their code lives in
+`phase4_one_million/src/` and their plans in that folder's `PRESENTATION.md` / `AUDIO.md` rather than
+in separate phase folders. (Audio was a standalone "Phase 5" in an earlier plan, now folded in as a
+track.) The optional theory behind every preset is mapped in [`MATH.md`](MATH.md).
 
 ---
 
