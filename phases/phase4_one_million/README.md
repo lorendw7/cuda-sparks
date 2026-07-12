@@ -487,10 +487,10 @@ tracks.)*
         silently if no device opens). Proves the OS audio path end-to-end (the "audio Hello
         World"). Sound design for all 8 presets is recorded in AUDIO.md — **Jia = a sparse
         pentatonic music-box melody over a warm drone.**
-  - [~] T1 event SFX — **preset-switch chime working** (event-driven: silent by default; an
+  - [~] T1 event SFX — **preset-switch chime done** (event-driven: silent by default; an
         `atomic<bool>` trigger set on each `selectPreset` and consumed in the callback, which
-        plays a buffer pre-rendered once at init via a read cursor; pure-sine placeholder for
-        now). Still to do: bell envelope, launch whoosh, mute / volume in the menu.
+        plays a buffer pre-rendered once at init via a read cursor; enveloped bell "ding" —
+        fast attack + exp decay). Still to do: launch whoosh, mute / volume in the menu.
   - [ ] T2 ambient beds · [ ] T3 audio-reactive (sim scalar drives the sound).
 
 ### Per-style advanced polish (OPTIONAL — LAST, after Presentation & Audio)

@@ -170,8 +170,10 @@ percussive / burst sounds; continuous looks get a sustained bed + slow modulatio
             voice on each `selectPreset`: `audio_play_chime()` sets an `atomic<bool>`; the
             realtime callback consumes it with `exchange(false)`, then walks a read cursor
             across a buffer pre-rendered once at init. Proves cross-thread signalling +
-            realtime-safe voice playback. (Synth is a **pure-sine placeholder** — a "beep".)
-      - [ ] Bell envelope for the chime (fast attack + exp decay → a "ding", not a beep).
+            realtime-safe voice playback. (Synth: a sine shaped by a fast-attack / exp-decay
+            envelope = a bell "ding".)
+      - [x] Bell envelope for the chime — fast linear attack (kills the onset click) +
+            `expf(-t/tau)` decay (tau = 0.12) → a "ding", not a flat beep.
       - [ ] Launch whoosh (filtered noise).
       - [ ] Mute toggle + volume slider in the Presentation menu.
 - [ ] T2 Ambient beds — one synthesized loop per preset, cross-fade on preset change

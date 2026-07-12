@@ -43,24 +43,39 @@ static std::atomic<bool> g_chimeTrigger{false};
 // single owner means no race, no atomic needed. -1 = idle; 0..size-1 = currently playing.
 static int g_chimePos = -1;
 
+// Pre-render one chime "ding" into g_chimeBuf. Runs ONCE from audio_init, on the MAIN thread --
+// the only place allocation is allowed (the realtime callback must never malloc). Rendered at
+// the device's ACTUAL sample rate so pitch and length come out right.
 static void build_chime(float sampleRate)
 {
+    // Size the voice: a short ding (~0.4 s). length in samples = seconds * samples-per-second.
     const float seconds = 0.4f;
     int len = (int)(seconds * sampleRate);
 
     if (len < 1) {
-        len = 1;
+        len = 1; // guard a bogus sample rate so the buffer is never empty
     }
 
-    g_chimeBuf.assign(len, 0.0f);
+    g_chimeBuf.assign(len, 0.0f); // allocate + zero (silent) before the loop fills it
 
+    // Fill each sample = amp * envelope(t) * sine(t). The envelope shapes the VOLUME over time;
+    // it's what turns a flat "beep" into a bell "ding" that strikes and then rings out.
     for (int i = 0; i < len; ++i)
     {
-        float t = (float) i / sampleRate;
-        float f = 880.f;
-        float amp = 0.3f;
-        const float PI2 = 6.28318530718f;
-        g_chimeBuf[i] = amp * sinf(PI2 * f * t);
+        float t = (float) i / sampleRate; // this sample's time, in seconds
+        float f = 880.f;                  // pitch: 880 Hz = A5 (bright, pleasant)
+        float amp = 0.3f;                 // stay well under 1.0 so mixing never clips
+        const float PI2 = 6.28318530718f; // 2*PI -> one full sine cycle
+        const float tau = 0.12f;          // decay time constant (s): bigger = rings longer
+
+        // Envelope = fast ATTACK * exponential DECAY:
+        //   attack: ramp 0->1 over the first 5 ms so the onset doesn't click (a hard start
+        //           snaps the speaker); flat 1.0 afterwards.
+        //   decay:  expf(-t/tau) falls from 1 toward 0 -- the "ring out" that makes it a ding.
+        float attack = (t < 0.005f) ? (t / 0.005f) : 1.0f;
+        float env = attack * expf(-t / tau);
+
+        g_chimeBuf[i] = amp * env * sinf(PI2 * f * t);
     }
 
 }
