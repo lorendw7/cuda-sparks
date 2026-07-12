@@ -1,7 +1,7 @@
 // Phase 4 -- Audio track. Procedurally-synthesized sound for the sim (see AUDIO.md).
-// Foundation step (T0): open a playback device and feed it a continuous 440 Hz sine tone,
-// to prove the whole audio path end to end (device -> audio thread -> callback -> samples
-// -> speakers) before layering on real SFX / beds / the reactive scalar.
+// T1 (event SFX): the device is SILENT by default and fires a one-shot "ding" only when the
+// sim triggers it (on every preset switch). The ding is pre-rendered into a buffer once at
+// init; "playing" it = walking a read cursor across that buffer, mixed into the output.
 //
 // miniaudio is a single-header library: this ONE .cpp defines MINIAUDIO_IMPLEMENTATION so
 // the whole implementation is compiled here (every OTHER file must include miniaudio.h
@@ -9,6 +9,9 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 #include <math.h> // sinf() -- synthesize the sine waveform
+#include <vector> // std::vector<float> -- the pre-rendered chime buffer
+#include <atomic> // std::atomic<bool> -- lock-free main <-> audio-thread signalling
+
 
 // Phase accumulator: the sine wave's CURRENT angle (radians). Each callback keeps advancing
 // it from where the last one left off, so the tone is continuous across callbacks. MUST be
@@ -20,6 +23,47 @@ static float g_phase = 0.0f;
 // audio_shutdown -- all three need it, so it's file-scope. static = internal linkage
 // (private to this .cpp), so it never collides with symbols in other files.
 static ma_device g_device;
+
+// ── The chime "voice": state shared between the MAIN thread (builds the sound, requests it)
+// and the AUDIO thread (plays it). Whether each needs atomic depends on ONE thing: is it
+// touched by a second thread? ──
+
+// The whole "ding", pre-rendered ONCE at init on the main thread. The callback only READS it
+// and never resizes it -- no concurrent writer, no allocation on the audio thread -- so a
+// plain vector is safe here. Empty until build_chime fills it.
+static std::vector<float> g_chimeBuf;
+
+// The ENTIRE main->audio message: main sets it true to ask for a ding; the callback reads and
+// clears it. Shared across two threads, so it MUST be atomic -- a plain bool would be a data
+// race (undefined behaviour). atomic<bool> is lock-free, so reading it in the realtime
+// callback is safe. Starts false = no ding pending.
+static std::atomic<bool> g_chimeTrigger{false};
+
+// Read cursor into g_chimeBuf. Touched by the audio thread ONLY, so a plain int is enough --
+// single owner means no race, no atomic needed. -1 = idle; 0..size-1 = currently playing.
+static int g_chimePos = -1;
+
+static void build_chime(float sampleRate)
+{
+    const float seconds = 0.4f;
+    int len = (int)(seconds * sampleRate);
+
+    if (len < 1) {
+        len = 1;
+    }
+
+    g_chimeBuf.assign(len, 0.0f);
+
+    for (int i = 0; i < len; ++i)
+    {
+        float t = (float) i / sampleRate;
+        float f = 880.f;
+        float amp = 0.3f;
+        const float PI2 = 6.28318530718f;
+        g_chimeBuf[i] = amp * sinf(PI2 * f * t);
+    }
+
+}
 
 // The audio thread calls this repeatedly to PULL data: each call hands us an empty output
 // buffer we must fill with samples. The signature (types + order) is fixed by miniaudio --
@@ -38,39 +82,45 @@ static void data_callback(ma_device *pDevice,
     // hardware may hand back a different channel count / rate, and using the wrong rate here
     // would detune the tone).
     ma_uint32 channels = pDevice->playback.channels; // interleaved stride (stereo = 2)
-    float sampleRate = (float)pDevice->sampleRate;   // frames per second (e.g. 48000)
 
-    // Per-frame phase increment dphi = 2*PI * f / sampleRate: how far the angle advances
-    // between two adjacent samples. It's a constant, so compute it once outside the loop.
-    const float PI2 = 6.28318530718f; // 2*PI = one full sine cycle
-    float f = 440.f;                  // tone frequency; 440 Hz = concert-pitch A4
-    float dphi = PI2 * f / sampleRate;
+    // Consume a pending trigger ONCE per block: exchange() reads the old value AND stores
+    // false in a single atomic step, so a ding requested since the last block rewinds the
+    // voice to sample 0 exactly once -- never double-fired, never lost.
+    if (g_chimeTrigger.exchange(false))
+    {
+        g_chimePos = 0; // (re)start the ding from its first sample
+    }
 
     // Outer loop: one iteration per FRAME. Inner loop: write that frame's value into every
     // channel of the interleaved buffer.
     for (ma_uint32 frame = 0; frame < frameCount; ++frame)
     {
-        // This frame's sample. 0.2 is the amplitude (volume) -- keep it well below 1.0 to
-        // stay quiet and avoid clipping (values outside [-1,1] get hard-limited = distortion).
-        float value = 0.2f * sinf(g_phase);
 
+        // Each frame starts at silence; the chime voice writes into it. Only ONE voice in T1 --
+        // when T2/T3 add voices, make these writes `+=` so voices MIX instead of overwrite.
+        float sample = 0.0f;
+
+        // Advance the chime voice while its cursor points at a real sample. The `< size()`
+        // half also keeps an empty/unfinished buffer safe (no out-of-bounds read).
+        if (g_chimePos >= 0 && g_chimePos < (int)g_chimeBuf.size())
+        {
+            sample = g_chimeBuf[g_chimePos]; // read the sample the cursor points at...
+            g_chimePos++;                    // ...then step the cursor forward one
+        }
+        else
+        {
+            g_chimePos = -1; // ran off the end (or nothing playing) -> idle
+        }
+        
         // Interleaved layout is [L0,R0, L1,R1, ...], so frame `frame` channel `ch` lives at
         // index frame*channels + ch. Writing the SAME value to every channel = a centered
         // mono tone.
         for (ma_uint32 ch = 0; ch < channels; ++ch)
         {
-            out[frame * channels + ch] = value;
+            out[frame * channels + ch] = sample;
         }
 
-        g_phase += dphi; // advance the angle by one sample's worth
 
-        // Wrap: subtracting a whole turn leaves the sound identical (sin is 2*PI-periodic) but
-        // keeps g_phase in [0, 2*PI) forever -- otherwise it grows without bound and sinf's
-        // float precision degrades. -= (not =0) preserves the tiny overshoot, so no drift.
-        if (g_phase >= PI2)
-        {
-            g_phase -= PI2;
-        }
     }
 }
 
@@ -93,6 +143,8 @@ bool audio_init()
         return false; // couldn't open (no device / exclusively held / ...)
     }
 
+    build_chime((float)g_device.sampleRate);
+
     // Start it: the audio thread spins up and begins calling data_callback -> sound starts.
     if (ma_device_start(&g_device) != MA_SUCCESS)
     {
@@ -109,4 +161,12 @@ bool audio_init()
 void audio_shutdown()
 {
     ma_device_uninit(&g_device);
+}
+
+// T1 public API: ask for a one-shot ding. Safe to call from the MAIN thread -- it only sets
+// an atomic flag; the audio thread picks it up next block (via exchange() in data_callback)
+// and rewinds the voice. Never touches g_chimePos or the buffer directly, so it cannot race.
+void audio_play_chime()
+{
+    g_chimeTrigger.store(true);
 }

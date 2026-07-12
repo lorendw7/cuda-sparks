@@ -247,6 +247,7 @@ int main()
         auto selectPreset = [&](int i, bool manual)
         {
             sim.set_preset(i); // upload the preset's emitters + physics
+            audio_play_chime();
             currentPreset = i; // keep the app's single notion of the active preset in sync
             if (manual)
             {

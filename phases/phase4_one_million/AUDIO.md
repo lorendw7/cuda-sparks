@@ -165,8 +165,15 @@ percussive / burst sounds; continuous looks get a sustained bed + slow modulatio
       (phase accumulation) in `audio.{h,cpp}`; `audio_init` / `audio_shutdown` bracket main's
       render loop (init is non-fatal — runs silently if no device). The "audio Hello World":
       proves the OS audio path device → thread → callback → samples → speakers.
-- [ ] T1 Event SFX — synthesized chime (preset switch) + whoosh (launch); mute + volume in
-      the menu
+- [ ] T1 Event SFX — *in progress.*
+      - [x] Preset-switch chime path — the device is SILENT by default and fires a one-shot
+            voice on each `selectPreset`: `audio_play_chime()` sets an `atomic<bool>`; the
+            realtime callback consumes it with `exchange(false)`, then walks a read cursor
+            across a buffer pre-rendered once at init. Proves cross-thread signalling +
+            realtime-safe voice playback. (Synth is a **pure-sine placeholder** — a "beep".)
+      - [ ] Bell envelope for the chime (fast attack + exp decay → a "ding", not a beep).
+      - [ ] Launch whoosh (filtered noise).
+      - [ ] Mute toggle + volume slider in the Presentation menu.
 - [ ] T2 Ambient beds — one synthesized loop per preset, cross-fade on preset change
 - [ ] T3 Audio-reactive — per-frame sim scalar (kinetic energy / particles near well) drives
       volume / pitch; shares the HUD's GPU read-back; optional beat-synced auto-play
