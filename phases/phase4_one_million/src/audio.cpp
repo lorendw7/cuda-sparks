@@ -11,13 +11,7 @@
 #include <math.h> // sinf() -- synthesize the sine waveform
 #include <vector> // std::vector<float> -- the pre-rendered chime buffer
 #include <atomic> // std::atomic<bool> -- lock-free main <-> audio-thread signalling
-
-
-// Phase accumulator: the sine wave's CURRENT angle (radians). Each callback keeps advancing
-// it from where the last one left off, so the tone is continuous across callbacks. MUST be
-// file-scope static (lives for the whole program) -- a local would reset to 0 every callback
-// and produce clicks/glitches instead of a smooth tone.
-static float g_phase = 0.0f;
+#include <cstdlib> // rand() / RAND_MAX -- white-noise samples for build_whoosh
 
 // The playback device handle. Opened by audio_init, read by data_callback, freed by
 // audio_shutdown -- all three need it, so it's file-scope. static = internal linkage
@@ -43,6 +37,13 @@ static std::atomic<bool> g_chimeTrigger{false};
 // single owner means no race, no atomic needed. -1 = idle; 0..size-1 = currently playing.
 static int g_chimePos = -1;
 
+// ── The whoosh "voice": a SECOND voice, the same three-part pattern as the chime above (a
+// pre-rendered buffer + an atomic trigger + an audio-thread-only cursor). Adding a voice =
+// copying this trio. Fired on fireworks shell launches (the GPU->CPU wiring lands in Part 2). ──
+static std::vector<float> g_whooshBuf;            // the pre-rendered whoosh (a noise burst)
+static std::atomic<bool>  g_whooshTrigger{false}; // main -> audio "play it" flag
+static int                g_whooshPos = -1;       // audio-thread read cursor; -1 = idle
+
 // ── Master controls: WRITTEN by the main thread (the menu), READ by the audio thread every
 // block. Cross-thread, so both are atomic (same rule as g_chimeTrigger); lock-free on desktop,
 // so reading them in the realtime callback is safe. muted wins over volume. ──
@@ -54,6 +55,34 @@ static std::atomic<float> g_volume{0.7f};
 // Master mute: while true the callback forces the gain to 0 (voices keep advancing, just silent).
 static std::atomic<bool> g_muted{false};
 
+// Pre-render the whoosh into g_whooshBuf. Same shape as build_chime, but the source is NOISE,
+// not a sine: a whoosh has no pitch, just a broadband "shhh" shaped by an envelope. Runs ONCE
+// at init on the main thread (rand() + allocation are fine here, never in the callback).
+static void build_whoosh(float sampleRate)
+{
+    const float seconds = 0.4f; // whoosh length (~0.4 s)
+
+    int len = (int)(seconds * sampleRate);
+    if (len < 1)
+    {
+        len = 1;
+    }
+
+    g_whooshBuf.assign(len, 0.0f); // allocate + zero before the loop fills it
+
+    // Fill each sample = amp * envelope(t) * noise. Noise (not a sine) is what makes it a whoosh.
+    for (int i = 0; i < len; ++i)
+    {
+        float t = (float)i / sampleRate;
+        // White noise: a fresh random sample in [-1, 1]. rand() -> [0, RAND_MAX]; /RAND_MAX ->
+        // [0, 1]; *2 - 1 -> [-1, 1]. Equal energy at ALL frequencies at once = a "shhh".
+        float noise = (rand() / (float)RAND_MAX) * 2.0f - 1;
+        float attack = (t < 0.01f) ? (t / 0.01f) : 1.0f; // 10 ms ramp-in -> no onset click
+        float env = attack * expf(-t / 0.15f);           // then exponential decay (tau = 0.15 s)
+        float amp = 0.25f;                               // noise is broadband -> keep it moderate
+        g_whooshBuf[i] = amp * env * noise;
+    }
+}
 
 // Pre-render one chime "ding" into g_chimeBuf. Runs ONCE from audio_init, on the MAIN thread --
 // the only place allocation is allowed (the realtime callback must never malloc). Rendered at
@@ -64,7 +93,8 @@ static void build_chime(float sampleRate)
     const float seconds = 0.4f;
     int len = (int)(seconds * sampleRate);
 
-    if (len < 1) {
+    if (len < 1)
+    {
         len = 1; // guard a bogus sample rate so the buffer is never empty
     }
 
@@ -74,7 +104,7 @@ static void build_chime(float sampleRate)
     // it's what turns a flat "beep" into a bell "ding" that strikes and then rings out.
     for (int i = 0; i < len; ++i)
     {
-        float t = (float) i / sampleRate; // this sample's time, in seconds
+        float t = (float)i / sampleRate;  // this sample's time, in seconds
         float f = 880.f;                  // pitch: 880 Hz = A5 (bright, pleasant)
         float amp = 0.3f;                 // stay well under 1.0 so mixing never clips
         const float PI2 = 6.28318530718f; // 2*PI -> one full sine cycle
@@ -89,7 +119,6 @@ static void build_chime(float sampleRate)
 
         g_chimeBuf[i] = amp * env * sinf(PI2 * f * t);
     }
-
 }
 
 // The audio thread calls this repeatedly to PULL data: each call hands us an empty output
@@ -117,7 +146,7 @@ static void data_callback(ma_device *pDevice,
     {
         g_chimePos = 0; // (re)start the ding from its first sample
     }
-    
+
     // Snapshot the master gain ONCE per block (cheap, and stable across the whole block). muted
     // overrides volume: muted -> 0, else the current volume. .load() = atomic read.
     float mainVolume = g_muted.load() ? 0.0f : g_volume.load();
@@ -135,14 +164,14 @@ static void data_callback(ma_device *pDevice,
         // half also keeps an empty/unfinished buffer safe (no out-of-bounds read).
         if (g_chimePos >= 0 && g_chimePos < (int)g_chimeBuf.size())
         {
-            sample = g_chimeBuf[g_chimePos]; // read the sample the cursor points at...
-            g_chimePos++;                    // ...then step the cursor forward one
+            sample += g_chimeBuf[g_chimePos]; // read the sample the cursor points at...
+            g_chimePos++;                     // ...then step the cursor forward one
         }
         else
         {
             g_chimePos = -1; // ran off the end (or nothing playing) -> idle
         }
-        
+
         sample *= mainVolume; // apply master volume / mute to the mixed voices, before output
         // Interleaved layout is [L0,R0, L1,R1, ...], so frame `frame` channel `ch` lives at
         // index frame*channels + ch. Writing the SAME value to every channel = a centered
@@ -151,8 +180,6 @@ static void data_callback(ma_device *pDevice,
         {
             out[frame * channels + ch] = sample;
         }
-
-
     }
 }
 
@@ -176,6 +203,7 @@ bool audio_init()
     }
 
     build_chime((float)g_device.sampleRate);
+    build_whoosh((float)g_device.sampleRate);
 
     // Start it: the audio thread spins up and begins calling data_callback -> sound starts.
     if (ma_device_start(&g_device) != MA_SUCCESS)
