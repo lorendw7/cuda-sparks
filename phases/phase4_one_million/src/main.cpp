@@ -585,6 +585,10 @@ int main()
             if (nowF11 == GLFW_PRESS && prevF11 == GLFW_RELEASE)
             {
                 fullscreen = !fullscreen;
+                // Exclusive fullscreen bypasses the OS compositor -> the system mouse cursor
+                // vanishes. Have ImGui draw a software cursor into the frame instead (fullscreen
+                // only; windowed keeps the normal OS cursor).
+                ImGui::GetIO().MouseDrawCursor = fullscreen;
                 if (fullscreen)
                 {
                     // Save the windowed rectangle BEFORE leaving windowed mode, so we can
