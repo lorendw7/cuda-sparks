@@ -43,6 +43,18 @@ static std::atomic<bool> g_chimeTrigger{false};
 // single owner means no race, no atomic needed. -1 = idle; 0..size-1 = currently playing.
 static int g_chimePos = -1;
 
+// ── Master controls: WRITTEN by the main thread (the menu), READ by the audio thread every
+// block. Cross-thread, so both are atomic (same rule as g_chimeTrigger); lock-free on desktop,
+// so reading them in the realtime callback is safe. muted wins over volume. ──
+
+// Master volume: a linear gain the callback multiplies onto every sample. 0 = silent, 1 = full.
+// Should start at 0.7 (70%) so audio isn't silent before the menu ever sets it.
+static std::atomic<float> g_volume{0.7f};
+
+// Master mute: while true the callback forces the gain to 0 (voices keep advancing, just silent).
+static std::atomic<bool> g_muted{false};
+
+
 // Pre-render one chime "ding" into g_chimeBuf. Runs ONCE from audio_init, on the MAIN thread --
 // the only place allocation is allowed (the realtime callback must never malloc). Rendered at
 // the device's ACTUAL sample rate so pitch and length come out right.
@@ -105,6 +117,10 @@ static void data_callback(ma_device *pDevice,
     {
         g_chimePos = 0; // (re)start the ding from its first sample
     }
+    
+    // Snapshot the master gain ONCE per block (cheap, and stable across the whole block). muted
+    // overrides volume: muted -> 0, else the current volume. .load() = atomic read.
+    float mainVolume = g_muted.load() ? 0.0f : g_volume.load();
 
     // Outer loop: one iteration per FRAME. Inner loop: write that frame's value into every
     // channel of the interleaved buffer.
@@ -127,6 +143,7 @@ static void data_callback(ma_device *pDevice,
             g_chimePos = -1; // ran off the end (or nothing playing) -> idle
         }
         
+        sample *= mainVolume; // apply master volume / mute to the mixed voices, before output
         // Interleaved layout is [L0,R0, L1,R1, ...], so frame `frame` channel `ch` lives at
         // index frame*channels + ch. Writing the SAME value to every channel = a centered
         // mono tone.
@@ -184,4 +201,27 @@ void audio_shutdown()
 void audio_play_chime()
 {
     g_chimeTrigger.store(true);
+}
+
+// T1 master controls, called from the menu (main thread). Each just writes an atomic, so they're
+// cheap and safe to call every frame; the callback picks up the change on its next block.
+
+// Menu mute toggle: the gain becomes 0 while muted (voices keep advancing, just silent).
+void audio_set_muted(bool muted)
+{
+    g_muted.store(muted);
+}
+
+// Menu volume slider: clamp to a sane [0,1] gain, then publish it to the audio thread.
+void audio_set_volume(float volume)
+{
+    if (volume < 0.0f)
+    {
+        volume = 0.0f;
+    }
+    else if (volume > 1.0f)
+    {
+        volume = 1.0f;
+    }
+    g_volume.store(volume);
 }

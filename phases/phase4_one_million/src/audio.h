@@ -6,3 +6,5 @@
 bool audio_init();       // open + start the playback device; returns true on success
 void audio_shutdown();   // stop + release the device (pairs with audio_init)
 void audio_play_chime(); // T1: fire a one-shot chime (call from the preset-switch path)
+void audio_set_muted(bool muted);    // T1: master mute toggle (menu -> audio thread)
+void audio_set_volume(float volume); // T1: master volume 0..1 (menu -> audio thread)

@@ -490,7 +490,8 @@ tracks.)*
   - [~] T1 event SFX — **preset-switch chime done** (event-driven: silent by default; an
         `atomic<bool>` trigger set on each `selectPreset` and consumed in the callback, which
         plays a buffer pre-rendered once at init via a read cursor; enveloped bell "ding" —
-        fast attack + exp decay). Still to do: launch whoosh, mute / volume in the menu.
+        fast attack + exp decay); menu mute + volume wired (ImGui -> atomics the callback reads
+        every block). Still to do: launch whoosh.
   - [ ] T2 ambient beds · [ ] T3 audio-reactive (sim scalar drives the sound).
 
 ### Per-style advanced polish (OPTIONAL — LAST, after Presentation & Audio)

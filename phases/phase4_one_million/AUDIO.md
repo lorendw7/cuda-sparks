@@ -175,7 +175,8 @@ percussive / burst sounds; continuous looks get a sustained bed + slow modulatio
       - [x] Bell envelope for the chime — fast linear attack (kills the onset click) +
             `expf(-t/tau)` decay (tau = 0.12) → a "ding", not a flat beep.
       - [ ] Launch whoosh (filtered noise).
-      - [ ] Mute toggle + volume slider in the Presentation menu.
+      - [x] Mute toggle + volume slider in the Presentation menu — ImGui checkbox + slider,
+            each pushing to an `atomic` the callback reads every block (master gain, mute wins).
 - [ ] T2 Ambient beds — one synthesized loop per preset, cross-fade on preset change
 - [ ] T3 Audio-reactive — per-frame sim scalar (kinetic energy / particles near well) drives
       volume / pitch; shares the HUD's GPU read-back; optional beat-synced auto-play

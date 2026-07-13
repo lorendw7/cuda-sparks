@@ -18,7 +18,7 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 #include "hud_log.h"
-#include "audio.h"           // Phase 4 audio track: playback device + synthesized tone
+#include "audio.h" // Phase 4 audio track: playback device + synthesized tone
 
 // P2a: keep the particle viewport a SQUARE so NDC [-1,1]^2 never stretches (dots stay
 // round on any aspect ratio). GLFW calls this whenever the framebuffer resizes -- window
@@ -207,6 +207,8 @@ int main()
         // single notion of the active preset, so the auto-cycler, the number keys, and
         // (later) the ImGui menu all agree on one value.
         bool autoPlay = false;
+        bool audioMuted = false;
+        float audioVolume = 0.7f;
         float presetTimer = 0.0f;
         int currentPreset = 1;        // must match the preset the ctor boots (set_preset(1) =
                                       // fireworks); otherwise the app's notion disagrees with the
@@ -265,7 +267,6 @@ int main()
         {
             fprintf(stderr, "audio init failed -- running without sound.\n");
         }
-        
 
         // Render loop: run until the user closes the window.
         while (!glfwWindowShouldClose(window))
@@ -409,6 +410,23 @@ int main()
                 ImGui::SliderFloat("Interval (s)", &presetInterval, 3.0f, 60.0f, "%.1f");
             };
 
+            // Content 2b: audio controls -- mute checkbox + volume slider. Each pushes its new
+            // value into the audio engine's atomics (audio_set_muted / audio_set_volume) ONLY on
+            // the frame ImGui reports a change (its return value), so we don't spam the setters.
+            auto drawAudio = [&]
+            {
+                if (ImGui::Checkbox("Mute", &audioMuted))
+                {
+                    audio_set_muted(audioMuted);
+                }
+
+                ImGui::SetNextItemWidth(200.0f);
+                if (ImGui::SliderFloat("Volume", &audioVolume, 0.0f, 1.0f, "%.2f"))
+                {
+                    audio_set_volume(audioVolume);
+                }
+            };
+
             // Content 3: live readouts (FPS / particle count / active preset name).
             auto drawReadouts = [&]
             {
@@ -437,6 +455,8 @@ int main()
                 ImGui::Separator();
                 drawAutoPlay();
                 ImGui::Separator();
+                drawAudio();
+                ImGui::Separator();
                 drawReadouts();
                 ImGui::Separator();
                 hud.draw();
@@ -463,7 +483,7 @@ int main()
                 ImGui::SetNextWindowSize(ImVec2(stripW, halfH), ImGuiCond_Always);
                 ImGui::Begin("PERF MONITOR", nullptr,
                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                            ImGuiWindowFlags_NoCollapse);
+                                 ImGuiWindowFlags_NoCollapse);
                 drawReadouts();
                 ImGui::End();
 
@@ -475,6 +495,8 @@ int main()
                 drawPresetPicker(false);
                 ImGui::Separator();
                 drawAutoPlay();
+                ImGui::Separator();
+                drawAudio();
                 ImGui::Separator();
                 hud.draw();
                 ImGui::End();
