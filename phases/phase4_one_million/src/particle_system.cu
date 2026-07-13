@@ -198,7 +198,7 @@ static const Preset presets[] = {
     {
         {
             //  x    y   angle spread baseSpd  r    g    b   life
-            {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.3, 0.8, 0.9, 8.6f}, // scatter ignores pos/aim; row gives color + life
+            {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.3, 0.8, 0.9, 12.0f}, // scatter ignores pos/aim; row gives color + life
         },
         1,     // numEmitters
         0.0f,  // gravity        -- off (the flow field drives all motion)
@@ -210,7 +210,7 @@ static const Preset presets[] = {
         1,     // useFlow        -- ON: births via spawn_scatter (seed the whole screen)
         0.0f,  // wind
         0.0f,  // turbulence
-        1.2f,  // curl           -- flow-field strength (turns force #6 on)
+        0.5f,  // curl           -- flow-field strength (turns force #6 on)
         0,     // useAttractor   -- Lorenz off
     },
     // ---- 7: strange attractor -- Lorenz butterfly, a VELOCITY-FIELD (not force) model. ----
@@ -311,6 +311,9 @@ __device__ const float palette[][3] = {
 __device__ inline float psi(float x, float y, float t)
 {
     float F = 6.12f;                                                 // base spatial frequency (eddy size); larger = smaller eddies
+    // TUNING the curl-noise look, one knob at a time: F above = eddy SIZE (smaller -> bigger,
+    // fewer eddies); delete octave 2 below for cleaner big swirls; preset #6's `curl` = flow
+    // SPEED; the +/- t phase = how fast the field morphs (drop t entirely for a STATIC field).
     return sinf(F * x + t) * cosf(F * y - t)                         // octave 1: coarse swell
            + 0.5f * sinf(2.0f * F * y - t) * cosf(2.0f * F * x + t); // octave 2: finer detail (2x freq, 0.5x amp)
 }
