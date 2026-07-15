@@ -359,6 +359,34 @@ here stays clean. Build them in this order:
    per-preset ambient beds → an **audio-reactive** layer driven by a scalar sampled from
    the live GPU sim. Do it **after Presentation** — it plugs straight into the menu
    (volume / mute) and auto-play (advance on the beat).
+3. **Interaction — mouse force field** — the first *interactive* feature (everything else
+   is autonomous). Holding the mouse spawns a gravity/repel **well at the cursor** so the
+   click point pulls (left) or pushes (right) the whole cloud in real time. Unlike the two
+   tracks above, this **does touch the kernel** — but only to add one more named force term
+   to the existing `(ax, ay)` accumulator, the same shape as `gravity` / attractor / `swirl`,
+   so it reinforces the L5 force model rather than adding new machinery. Independent of Audio;
+   can be built any time after L5. **Five steps:**
+   1. **`SimParams` fields** (`include/particles.h`): `float mouseX, mouseY` (cursor in
+      **world** coords, the same `[-bound, bound]` space as `x`/`y`), `int mouseActive`
+      (0 = off, +1 = attract / left button, −1 = repel / right button), `float mouseStrength`
+      (pull-accel scale, ~3.0).
+   2. **Pixel → world** (`main.cpp`, main loop): from `glfwGetCursorPos` (pixels, top-left
+      origin) and `glfwGetWindowSize` → NDC `[-1, 1]`, flip Y, scale by `bound`:
+      `wx = (mx/w*2 − 1)·bound`, `wy = (1 − my/h*2)·bound`. Read the buttons with
+      `glfwGetMouseButton` and set `mouseActive` to ±1 / 0.
+      - ⚠ **Aspect ratio** — if the projection letterboxes to stay square, scale the wider
+        axis or the well lands off-cursor on a non-square window.
+      - ⚠ **Menu clicks** — check `ImGui::GetIO().WantCaptureMouse`; if true, force
+        `mouseActive = 0` so clicking the ImGui menu doesn't also spawn a well.
+   3. **Force term** (`particle_system.cu`, `update_kernel`, before the integrate):
+      `if (mouseActive) { dx = mouseX−x; dy = mouseY−y; r2 = dx*dx+dy*dy+soft; invr =
+      rsqrtf(r2); f = mouseActive*mouseStrength*invr*invr; vx += f*dx*invr*dt; vy +=
+      f*dy*invr*dt; }` — `soft ≈ 0.01` avoids the `r → 0` divide-by-zero / force blow-up;
+      inverse-square falloff, `dx*invr` = unit direction.
+   4. **Push `mouseX`/`mouseY`/`mouseActive` into `params_`** each frame, onto the GPU along
+      the existing per-frame param path.
+   5. **Verify** in **discrete-GPU** mode (interop crashes on hybrid): left button clumps the
+      cloud, right button blows it open.
 
 *(L7 is an optional stretch and can be done any time after L6; it does not block these
 tracks.)*
@@ -493,6 +521,10 @@ tracks.)*
         fast attack + exp decay); menu mute + volume wired (ImGui -> atomics the callback reads
         every block). Still to do: launch whoosh.
   - [ ] T2 ambient beds · [ ] T3 audio-reactive (sim scalar drives the sound).
+- [ ] Interaction — **mouse force field** (click-to-attract / right-click-to-repel well
+      at the cursor). First interactive feature; adds one force term to `update_kernel`
+      (spec above: *[Beyond the CUDA levels](#beyond-the-cuda-levels--application-tracks)*,
+      track 3). Independent of Audio; buildable any time after L5.
 
 ### Per-style advanced polish (OPTIONAL — LAST, after Presentation & Audio)
 
