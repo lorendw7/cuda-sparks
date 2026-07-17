@@ -174,7 +174,16 @@ percussive / burst sounds; continuous looks get a sustained bed + slow modulatio
             envelope = a bell "ding".)
       - [x] Bell envelope for the chime — fast linear attack (kills the onset click) +
             `expf(-t/tau)` decay (tau = 0.12) → a "ding", not a flat beep.
-      - [ ] Launch whoosh (filtered noise).
+      - [ ] Launch whoosh (filtered noise) — *in progress.*
+            - [x] Synthesis — `build_whoosh` pre-renders a white-noise burst shaped by the same
+                  attack / exp-decay envelope as the chime (a second voice: buffer + atomic
+                  trigger + audio-thread cursor, mirroring the chime trio).
+            - [x] Mixed into the callback — its own `exchange(false)` block-level trigger + a
+                  frame-level `sample += g_whooshBuf[pos]` (voices sum, since the mix is `+=`).
+                  Inert until something calls `audio_play_whoosh()`.
+            - [ ] One-pole low-pass filter in `build_whoosh` — smooths the raw noise from a
+                  "shhh" into a "whoosh" (`y += a*(x-y)`, `a` from a cutoff freq).
+            - [ ] GPU launch-count read-back → `audio_play_whoosh()` on shell launch.
       - [x] Mute toggle + volume slider in the Presentation menu — ImGui checkbox + slider,
             each pushing to an `atomic` the callback reads every block (master gain, mute wins).
 - [ ] T2 Ambient beds — one synthesized loop per preset, cross-fade on preset change

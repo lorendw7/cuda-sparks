@@ -147,6 +147,11 @@ static void data_callback(ma_device *pDevice,
         g_chimePos = 0; // (re)start the ding from its first sample
     }
 
+    if (g_whooshTrigger.exchange(false))
+    {
+        g_whooshPos = 0;
+    }
+
     // Snapshot the master gain ONCE per block (cheap, and stable across the whole block). muted
     // overrides volume: muted -> 0, else the current volume. .load() = atomic read.
     float mainVolume = g_muted.load() ? 0.0f : g_volume.load();
@@ -171,6 +176,17 @@ static void data_callback(ma_device *pDevice,
         {
             g_chimePos = -1; // ran off the end (or nothing playing) -> idle
         }
+
+        if (g_whooshPos >= 0 && g_whooshPos < (int)g_whooshBuf.size())
+        {
+            sample += g_whooshBuf[g_whooshPos];
+            g_whooshPos++;
+        }
+        else
+        {
+            g_whooshPos = -1;
+        }
+        
 
         sample *= mainVolume; // apply master volume / mute to the mixed voices, before output
         // Interleaved layout is [L0,R0, L1,R1, ...], so frame `frame` channel `ch` lives at
@@ -252,4 +268,11 @@ void audio_set_volume(float volume)
         volume = 1.0f;
     }
     g_volume.store(volume);
+}
+
+// T1 public API: ask for a one-shot whoosh. Same contract as audio_play_chime -- only sets an
+// atomic flag from the main thread; the callback consumes it next block. Safe, cannot race.
+void audio_play_whoosh()
+{
+    g_whooshTrigger.store(true);
 }
