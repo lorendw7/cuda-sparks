@@ -310,7 +310,7 @@ __device__ const float palette[][3] = {
 // ===========================================================================
 __device__ inline float psi(float x, float y, float t)
 {
-    float F = 6.12f;                                                 // base spatial frequency (eddy size); larger = smaller eddies
+    float F = 6.12f; // base spatial frequency (eddy size); larger = smaller eddies
     // TUNING the curl-noise look, one knob at a time: F above = eddy SIZE (smaller -> bigger,
     // fewer eddies); delete octave 2 below for cleaner big swirls; preset #6's `curl` = flow
     // SPEED; the +/- t phase = how fast the field morphs (drop t entirely for a STATIC field).
@@ -522,7 +522,7 @@ __global__ void init_rng(curandState *rng, int n, unsigned long long seed)
 // kernel MUST run BEFORE update_kernel each frame (so the pulse is fresh). One
 // RNG per shell (rng[i]) draws the center / color / timings.
 // ===========================================================================
-__global__ void advance_shells(Shell *shells, int s, float dt, curandState *rng)
+__global__ void advance_shells(Shell *shells, int s, float dt, curandState *rng, int *launchCount)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= s)
@@ -543,7 +543,12 @@ __global__ void advance_shells(Shell *shells, int s, float dt, curandState *rng)
         else // ---- dark gap over -> relaunch somewhere new ----
         {
             shells[i].live = 1;
-            shells[i].launch = 1;                                     // pulse: tells update_kernel to respawn this shell's particles
+            shells[i].launch = 1; // pulse: tells update_kernel to respawn this shell's particles
+            // T1 whoosh: tally this launch for the CPU. atomicAdd -- not ++ -- because every
+            // shell runs on its OWN thread and several can relaunch on the same frame; a plain
+            // ++ is a read-modify-write that two threads can interleave, silently losing counts.
+            // atomicAdd makes those three steps indivisible in hardware.
+            atomicAdd(launchCount, 1);
             shells[i].cx = ((curand_uniform(&rng[i]) - 0.5f) * 1.6f); // new center x in (-0.8,0.8]
             shells[i].cy = ((curand_uniform(&rng[i]) - 0.5f) * 1.6f); // new center y in (-0.8,0.8]
 
@@ -962,6 +967,8 @@ ParticleSystem::ParticleSystem(const SimParams &p) // definition of the ctor dec
     // L6-2: the shell state array + its own (smaller) RNG pool, one per shell.
     CUDA_CHECK(cudaMalloc(&d_shells_, (size_t)params_.numShells * sizeof(Shell)));
     CUDA_CHECK(cudaMalloc(&d_shell_rng_, (size_t)params_.numShells * sizeof(curandState)));
+    // T1 whoosh: a single device int (4 bytes) that advance_shells tallies launches into.
+    CUDA_CHECK(cudaMalloc(&d_launchCount_, sizeof(int)));
     // L6 #7: zero the z array up front. z is only used by the Lorenz attractor, but the
     // sim boots as fireworks; when the user switches TO attractor, particles still carrying
     // a positive life from the old look run Lorenz integration before their first respawn.
@@ -1052,7 +1059,8 @@ ParticleSystem::~ParticleSystem()
     cudaFree(d_rng_);
     cudaFree(d_shells_);    // L6-2: shell state array
     cudaFree(d_shell_rng_); // L6-2: shell RNG pool
-    cudaFree(d_.z);         // L6 #7: Lorenz attractor's 3rd coordinate
+    cudaFree(d_launchCount_); // T1 whoosh: the launch-tally scalar
+    cudaFree(d_.z); // L6 #7: Lorenz attractor's 3rd coordinate
 }
 
 // ===========================================================================
@@ -1082,12 +1090,37 @@ void ParticleSystem::update(float dt)
     //    shell state advance_shells just produced.
     int sblock = 256, sgrid = (params_.numShells + sblock - 1) / sblock;
     params_.time += dt;
-    advance_shells<<<sgrid, sblock>>>(d_shells_, params_.numShells, dt, (curandState *)d_shell_rng_);
+
+    // T1 whoosh, step 1 of 2: clear the launch tally BEFORE advance_shells. Without this the
+    // atomicAdds keep accumulating across frames and the readback would report "launches since
+    // startup" instead of "launches this frame".
+    CUDA_CHECK(cudaMemset(d_launchCount_, 0, sizeof(int)));
+
+    advance_shells<<<sgrid, sblock>>>(d_shells_, params_.numShells, dt, (curandState *)d_shell_rng_, d_launchCount_);
     CUDA_CHECK(cudaGetLastError());
+
     int block = 256;
     int grid = (n_ + block - 1) / block;
     update_kernel<<<grid, block>>>(d_, d_vbo, n_, params_, dt, (curandState *)d_rng_, d_shells_);
     CUDA_CHECK(cudaGetLastError());
+
+    // T1 whoosh, step 2 of 2: pull the tally back to the host. Issued AFTER both kernel launches
+    // on purpose -- cudaMemcpy on the default stream blocks until everything queued ahead of it
+    // finishes, so placing it here costs nothing (the unmap below would have synced anyway),
+    // whereas putting it BETWEEN the two kernels would stall the CPU before update_kernel is even
+    // queued. &lastLaunchCount_ takes the address of the host int to write into; d_launchCount_
+    // is already a device address, so it needs no &.
+    CUDA_CHECK(cudaMemcpy(&lastLaunchCount_, d_launchCount_, sizeof(int), cudaMemcpyDeviceToHost));
+
+    // advance_shells runs EVERY frame regardless of preset (its one-frame launch pulse must stay
+    // fresh for update_kernel), so its state machine keeps relaunching in the background even
+    // under rain/smoke/attractor -- presets that ignore shells entirely. Those launches are real
+    // in the tally but invisible on screen, so drop them here: a non-shell preset has no launch
+    // event, and a whoosh with nothing bursting would just be a ghost sound.
+    if (!params_.useShells)
+    {
+        lastLaunchCount_ = 0;
+    }
 
     // 4) Return the VBO: CUDA -> GL. Waits for the kernel to finish, so the
     //    buffer is safe for draw() the moment this returns. draw() must come AFTER.

@@ -15,11 +15,11 @@
 // ===========================================================================
 struct Shell
 {
-    float cx, cy;      // burst center  -- picked fresh at each relaunch
-    float cr, cg, cb;  // burst color   -- picked fresh at each relaunch (one color per burst)
-    float timer;       // seconds left in the current phase (counts down)
-    int live;          // 1 = exploding (fly + draw), 0 = dark (invisible, waiting)
-    int launch;        // 1 = relaunched THIS frame -> particles (re)spawn at the center
+    float cx, cy;     // burst center  -- picked fresh at each relaunch
+    float cr, cg, cb; // burst color   -- picked fresh at each relaunch (one color per burst)
+    float timer;      // seconds left in the current phase (counts down)
+    int live;         // 1 = exploding (fly + draw), 0 = dark (invisible, waiting)
+    int launch;       // 1 = relaunched THIS frame -> particles (re)spawn at the center
 };
 
 // ===========================================================================
@@ -55,16 +55,23 @@ struct ParticleSoA
 class ParticleSystem
 {
 private:
-    SimParams params_;                        // simulation config (dt, gravity, bound, n...)
-    int n_ = 0;                               // total particle count
-    ParticleSoA d_;                           // the 8 device field-arrays (allocated in the ctor)
+    SimParams params_;                             // simulation config (dt, gravity, bound, n...)
+    int n_ = 0;                                    // total particle count
+    ParticleSoA d_;                                // the 8 device field-arrays (allocated in the ctor)
     cudaGraphicsResource *vbo_resource_ = nullptr; // interop handle for the renderer's VBO
-    void *d_rng_ = nullptr;                    // device curandState[n] (one RNG per particle);
-                                               // void* so this host header needs no CUDA headers
-    Shell *d_shells_ = nullptr;    // device Shell[numShells] -- the per-shell state machine
-    void *d_shell_rng_ = nullptr;  // device curandState[numShells] -- ONE RNG per shell (not
-                                   // per particle): the shell kernel draws burst center/color/
-                                   // timing. void* for the same header-cleanliness reason as d_rng_.
+    void *d_rng_ = nullptr;                        // device curandState[n] (one RNG per particle);
+                                                   // void* so this host header needs no CUDA headers
+    Shell *d_shells_ = nullptr;                    // device Shell[numShells] -- the per-shell state machine
+    void *d_shell_rng_ = nullptr;                  // device curandState[numShells] -- ONE RNG per shell (not
+                                                   // per particle): the shell kernel draws burst center/color/
+                                                   // timing. void* for the same header-cleanliness reason as d_rng_.
+    // T1 whoosh (audio): a GPU->CPU readback pair. advance_shells atomicAdds into the
+    // device int once per shell that relaunches; update() zeroes it before the kernels
+    // and copies it back into the host mirror after -- 4 bytes per frame, the opposite
+    // direction from the L2 interop path but far too small to cost anything.
+    int *d_launchCount_ = nullptr; // device int: shells that launched THIS frame
+    int lastLaunchCount_ = 0;      // host mirror of the above, refreshed by update()
+
 public:
     // Constructor: cudaMalloc the 8 SoA arrays and fill them on the GPU via
     // init_kernel. explicit forbids an implicit SimParams->ParticleSystem.
@@ -76,6 +83,10 @@ public:
     // Particle count. const: reads a member, modifies nothing.
     int size() const { return n_; }
 
+    // How many shells relaunched during the last update(). main() reads it to fire the
+    // launch "whoosh" SFX. const: reads the host mirror, touches no device state.
+    int launches_last_frame() const { return lastLaunchCount_; }
+
     // Advance the whole system by dt: map the VBO, launch the kernel (physics +
     // vertex write), unmap. Not const -- it mutates device state and the VBO.
     void update(float dt);
@@ -85,7 +96,7 @@ public:
 
     // Push an emitter table into __constant__ memory (cudaMemcpyToSymbol) and set
     // params_.numEmitters. Called by the ctor and by set_preset on every switch.
-    void upload_emitter(const Emitter*, int count);
+    void upload_emitter(const Emitter *, int count);
 
     // Switch to effect preset i (clamped): re-upload its emitters + copy its physics
     // knobs into params_. Cheap -- no realloc; the look fades in as particles recycle.

@@ -160,9 +160,8 @@ static void data_callback(ma_device *pDevice,
     // channel of the interleaved buffer.
     for (ma_uint32 frame = 0; frame < frameCount; ++frame)
     {
-
-        // Each frame starts at silence; the chime voice writes into it. Only ONE voice in T1 --
-        // when T2/T3 add voices, make these writes `+=` so voices MIX instead of overwrite.
+        // Each frame starts at silence, then every voice ADDS itself in (`+=`, never `=`) so the
+        // voices MIX. Two voices today (chime, whoosh); T2/T3 just add more of the same blocks.
         float sample = 0.0f;
 
         // Advance the chime voice while its cursor points at a real sample. The `< size()`
@@ -187,7 +186,6 @@ static void data_callback(ma_device *pDevice,
             g_whooshPos = -1;
         }
         
-
         sample *= mainVolume; // apply master volume / mute to the mixed voices, before output
         // Interleaved layout is [L0,R0, L1,R1, ...], so frame `frame` channel `ch` lives at
         // index frame*channels + ch. Writing the SAME value to every channel = a centered

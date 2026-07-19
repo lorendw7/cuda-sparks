@@ -183,7 +183,14 @@ percussive / burst sounds; continuous looks get a sustained bed + slow modulatio
                   Inert until something calls `audio_play_whoosh()`.
             - [ ] One-pole low-pass filter in `build_whoosh` — smooths the raw noise from a
                   "shhh" into a "whoosh" (`y += a*(x-y)`, `a` from a cutoff freq).
-            - [ ] GPU launch-count read-back → `audio_play_whoosh()` on shell launch.
+            - [x] GPU launch-count read-back → `audio_play_whoosh()` on shell launch. A device
+                  `int` (`d_launchCount_`): `update()` `cudaMemset`s it to 0, `advance_shells`
+                  `atomicAdd`s once per relaunching shell (atomic because each shell is its own
+                  thread and several can fire the same frame), then a 4-byte D2H `cudaMemcpy`
+                  mirrors it to the host. `main` fires ONE whoosh per frame when the count > 0.
+                  This is the *same* small read-back T3 will reuse — the interop path in reverse,
+                  but a scalar, so effectively free. Non-shell presets zero the mirror so the
+                  ever-running shell state machine can't emit ghost whooshes under rain/smoke.
       - [x] Mute toggle + volume slider in the Presentation menu — ImGui checkbox + slider,
             each pushing to an `atomic` the callback reads every block (master gain, mute wins).
 - [ ] T2 Ambient beds — one synthesized loop per preset, cross-fade on preset change

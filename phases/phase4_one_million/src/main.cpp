@@ -522,6 +522,16 @@ int main()
             }
 
             sim.update(dt); // map VBO -> kernel writes physics + vertices -> unmap
+            // T1 whoosh: sim.update() just copied this frame's shell-launch tally back from the
+            // GPU, so a non-zero count means at least one firework went off -> fire the SFX.
+            // Deliberately ONE whoosh even when several shells launch together: retriggering the
+            // same voice N times would just restart it N times, and layering identical noise
+            // bursts smears into mush rather than sounding like N launches.
+            if (sim.launches_last_frame() > 0)
+            {
+                audio_play_whoosh();
+            }
+
             auto t1 = std::chrono::high_resolution_clock::now();
 
             // Accumulate the update time in milliseconds (duration<double, milli>).
