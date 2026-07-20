@@ -37,12 +37,22 @@ static std::atomic<bool> g_chimeTrigger{false};
 // single owner means no race, no atomic needed. -1 = idle; 0..size-1 = currently playing.
 static int g_chimePos = -1;
 
-// ── The whoosh "voice": a SECOND voice, the same three-part pattern as the chime above (a
-// pre-rendered buffer + an atomic trigger + an audio-thread-only cursor). Adding a voice =
-// copying this trio. Fired on fireworks shell launches (the GPU->CPU wiring lands in Part 2). ──
-static std::vector<float> g_whooshBuf;           // the pre-rendered whoosh (a noise burst)
-static std::atomic<bool> g_whooshTrigger{false}; // main -> audio "play it" flag
-static int g_whooshPos = -1;                     // audio-thread read cursor; -1 = idle
+// ── The whoosh "voice": like the chime, but with NUM_WHOOSH pre-rendered VARIANTS so no two
+// launches sound identical (a single buffer replayed = an obvious mechanical repeat the ear
+// catches). Fired on fireworks shell launches (the GPU tallies launches, the CPU reads the count
+// back and calls audio_play_whoosh). WHICH variant plays is chosen per launch on the main thread. ──
+static const int NUM_WHOOSH = 5;                    // how many variants to pre-render
+
+static std::vector<float> g_whooshBufs[NUM_WHOOSH]; // the N pre-rendered whooshes (each a noise burst)
+static std::atomic<bool> g_whooshTrigger{false};    // main -> audio "play it" flag
+// Which variant to play NEXT: main picks it (audio_play_whoosh) BEFORE raising the trigger; the
+// audio thread reads it when it consumes the trigger. Cross-thread -> must be atomic.
+static std::atomic<int> g_whooshWhich{0};
+static int g_whooshPos = -1;                         // audio-thread read cursor; -1 = idle
+// Which variant is CURRENTLY playing: latched from g_whooshWhich the instant the trigger fires,
+// then used for the whole playback (so a mid-play re-pick can't swap the buffer under us).
+// Audio-thread-only -> plain int, no atomic.
+static int g_whooshCur = 0;
 
 // ── Master controls: WRITTEN by the main thread (the menu), READ by the audio thread every
 // block. Cross-thread, so both are atomic (same rule as g_chimeTrigger); lock-free on desktop,
@@ -55,50 +65,60 @@ static std::atomic<float> g_volume{0.7f};
 // Master mute: while true the callback forces the gain to 0 (voices keep advancing, just silent).
 static std::atomic<bool> g_muted{false};
 
-// Pre-render the whoosh into g_whooshBuf. Same shape as build_chime, but the source is NOISE,
-// not a sine: a whoosh has no pitch, just broadband hiss. Raw white noise alone is a harsh
-// "shhh", so we run it through a one-pole LOW-PASS filter (keep the lows, shed the highs) to
-// soften it into a "whoosh", then shape the result with an envelope. Runs ONCE at init on the
-// main thread (rand() + allocation are fine here, never in the callback).
-static void build_whoosh(float sampleRate)
+
+// Render ONE whoosh variant into `buf`. All the per-variant knobs (length, sweep range, decay,
+// level) come in as params so build_whoosh can jitter them. Combines three ingredients:
+// low-passed noise (the body) + a cutoff that SWEEPS high->low (movement) + a low "thump" (the
+// mortar launch punch). Runs at init on the main thread (rand + allocation are fine here).
+static void build_one_whoosh(std::vector<float> &buf, float sampleRate, float seconds, float fcStart, float fcEnd, float tau, float amp)
 {
-    const float seconds = 0.4f; // whoosh length (~0.4 s)
-
     int len = (int)(seconds * sampleRate);
-    if (len < 1)
-    {
-        len = 1;
-    }
+    if (len < 1) len = 1;
+    buf.assign(len, 0.0f);
 
-    g_whooshBuf.assign(len, 0.0f); // allocate + zero before the loop fills it
-
-    // One-pole low-pass filter coefficients (constant for the whole buffer, so compute ONCE
-    // here, not per sample). The filter is y += a*(x - y): each output chases the input but
-    // only closes a fraction `a` of the gap per sample, so it can't keep up with fast (high-
-    // frequency) wiggles -> highs get smoothed away, lows pass. fc = cutoff (Hz): below it
-    // passes, above it is attenuated. a = 1 - e^(-2*pi*fc/SR) makes fc mean the same thing at
-    // any sample rate.
-    const float fc = 1500.0f;
     const float PI2 = 6.28318530718f;
-    float a = 1 - expf(-PI2 * fc / sampleRate);
+    float y = 0.0f; // low-pass filter state (carries across samples, as before)
 
-    // Filter STATE: the previous output y[n-1]. MUST live outside the loop so it carries from
-    // one sample to the next -- that memory IS the filter. Starts at 0 (filter at rest).
-    float y = 0.0f;
-
-    // Fill each sample = amp * envelope(t) * low-passed noise. Noise (not a sine) is what makes
-    // it a whoosh; the low-pass is what turns "shhh" into "whoosh".
     for (int i = 0; i < len; ++i)
     {
         float t = (float)i / sampleRate;
-        // White noise: a fresh random sample in [-1, 1]. rand() -> [0, RAND_MAX]; /RAND_MAX ->
-        // [0, 1]; *2 - 1 -> [-1, 1]. Equal energy at ALL frequencies at once = a "shhh".
-        float noise = (rand() / (float)RAND_MAX) * 2.0f - 1;
-        y += a * (noise - y);                            // one filter step -> y is now low-passed
+
+        // SWEEP: the cutoff glides fcStart -> fcEnd across the whoosh, so `a` is recomputed each
+        // sample (no longer constant). frac = play progress 0..1; fcNow = linear interp between them.
+        float frac = t / seconds;
+        float fcNow = fcStart + (fcEnd - fcStart) * frac;
+        float a = 1.0f - expf(-PI2 * fcNow / sampleRate);
+
+        // body: white noise -> one low-pass step (y is now the low-passed sample)
+        float noise = (rand() / (float)RAND_MAX) * 2.0f - 1.0f;
+        y += a * (noise - y);
         float attack = (t < 0.01f) ? (t / 0.01f) : 1.0f; // 10 ms ramp-in -> no onset click
-        float env = attack * expf(-t / 0.15f);           // then exponential decay (tau = 0.15 s)
-        float amp = 0.5f;    // bumped up from 0.25: the low-pass drops the level, so compensate
-        g_whooshBuf[i] = amp * env * y;                  // filtered noise (y), not raw noise
+        float env = attack * expf(-t / tau);             // then exponential decay (tau = param)
+
+        // THUMP: a short low (80 Hz) sine with its OWN fast decay (tau = 0.05 s) = the mortar
+        // punch at launch. Fixed pitch (no sweep) so a plain sinf(2*pi*f*t) is safe here -- no
+        // phase accumulator needed (that trap only bites a SWEPT oscillator).
+        float thump = 0.35f * expf(-t / 0.05f) * sinf(PI2 * 80.0f * t);
+
+        buf[i] = amp * env * y + thump; // mix: low-passed-noise whoosh + the thump
+    }
+}
+
+// Pre-render ALL NUM_WHOOSH whoosh variants. Each gets jittered params via the pattern
+// base + range * (rand()/RAND_MAX) = a random value in [base, base+range], so no two variants
+// (hence no two launches) sound the same; build_one_whoosh does the actual synthesis. Runs ONCE
+// from audio_init on the main thread (rand + allocation are fine here, never in the callback).
+static void build_whoosh(float sampleRate)
+{
+    for (int k = 0; k < NUM_WHOOSH; k++)
+    {
+        float seconds = 0.7f + 0.3f * (rand() / (float)RAND_MAX);      // 0.7 .. 1.0 s length
+        float fcStart = 1200.0f + 400.0f * (rand() / (float)RAND_MAX); // sweep HIGH end (start)
+        float fcEnd = 500.0f + 300.0f * (rand() / (float)RAND_MAX);    // sweep LOW end (finish)
+        float tau = 0.22f + 0.08f * (rand() / (float)RAND_MAX);        // 0.22 .. 0.30 s decay
+        float amp = 0.55f;                                             // fixed level (not jittered)
+
+        build_one_whoosh(g_whooshBufs[k], sampleRate, seconds, fcStart, fcEnd, tau, amp);
     }
 }
 
@@ -167,6 +187,7 @@ static void data_callback(ma_device *pDevice,
 
     if (g_whooshTrigger.exchange(false))
     {
+        g_whooshCur = g_whooshWhich.load();
         g_whooshPos = 0;
     }
 
@@ -194,9 +215,9 @@ static void data_callback(ma_device *pDevice,
             g_chimePos = -1; // ran off the end (or nothing playing) -> idle
         }
 
-        if (g_whooshPos >= 0 && g_whooshPos < (int)g_whooshBuf.size())
+        if (g_whooshPos >= 0 && g_whooshPos < (int)g_whooshBufs[g_whooshCur].size())
         {
-            sample += g_whooshBuf[g_whooshPos];
+            sample += g_whooshBufs[g_whooshCur][g_whooshPos];
             g_whooshPos++;
         }
         else
@@ -286,9 +307,12 @@ void audio_set_volume(float volume)
     g_volume.store(volume);
 }
 
-// T1 public API: ask for a one-shot whoosh. Same contract as audio_play_chime -- only sets an
-// atomic flag from the main thread; the callback consumes it next block. Safe, cannot race.
+// T1 public API: ask for a one-shot whoosh. Picks a RANDOM variant, then raises the trigger --
+// both just atomic stores from the main thread, so it's safe and can't race. Order matters: the
+// variant is stored BEFORE the trigger, so when the audio thread sees the trigger it also sees
+// the fresh index (seq_cst atomics guarantee that ordering).
 void audio_play_whoosh()
 {
-    g_whooshTrigger.store(true);
+    g_whooshWhich.store(rand() % NUM_WHOOSH); // choose which of the NUM_WHOOSH variants to play
+    g_whooshTrigger.store(true);              // then signal the callback to (re)start it
 }
