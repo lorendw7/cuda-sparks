@@ -8,9 +8,9 @@
 // WITHOUT the macro, or the symbols get duplicated at link time).
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
-#include <math.h> // sinf() -- synthesize the sine waveform
-#include <vector> // std::vector<float> -- the pre-rendered chime buffer
-#include <atomic> // std::atomic<bool> -- lock-free main <-> audio-thread signalling
+#include <math.h>  // sinf() -- synthesize the sine waveform
+#include <vector>  // std::vector<float> -- the pre-rendered chime buffer
+#include <atomic>  // std::atomic<bool> -- lock-free main <-> audio-thread signalling
 #include <cstdlib> // rand() / RAND_MAX -- white-noise samples for build_whoosh
 
 // The playback device handle. Opened by audio_init, read by data_callback, freed by
@@ -40,9 +40,9 @@ static int g_chimePos = -1;
 // ── The whoosh "voice": a SECOND voice, the same three-part pattern as the chime above (a
 // pre-rendered buffer + an atomic trigger + an audio-thread-only cursor). Adding a voice =
 // copying this trio. Fired on fireworks shell launches (the GPU->CPU wiring lands in Part 2). ──
-static std::vector<float> g_whooshBuf;            // the pre-rendered whoosh (a noise burst)
-static std::atomic<bool>  g_whooshTrigger{false}; // main -> audio "play it" flag
-static int                g_whooshPos = -1;       // audio-thread read cursor; -1 = idle
+static std::vector<float> g_whooshBuf;           // the pre-rendered whoosh (a noise burst)
+static std::atomic<bool> g_whooshTrigger{false}; // main -> audio "play it" flag
+static int g_whooshPos = -1;                     // audio-thread read cursor; -1 = idle
 
 // ── Master controls: WRITTEN by the main thread (the menu), READ by the audio thread every
 // block. Cross-thread, so both are atomic (same rule as g_chimeTrigger); lock-free on desktop,
@@ -56,8 +56,10 @@ static std::atomic<float> g_volume{0.7f};
 static std::atomic<bool> g_muted{false};
 
 // Pre-render the whoosh into g_whooshBuf. Same shape as build_chime, but the source is NOISE,
-// not a sine: a whoosh has no pitch, just a broadband "shhh" shaped by an envelope. Runs ONCE
-// at init on the main thread (rand() + allocation are fine here, never in the callback).
+// not a sine: a whoosh has no pitch, just broadband hiss. Raw white noise alone is a harsh
+// "shhh", so we run it through a one-pole LOW-PASS filter (keep the lows, shed the highs) to
+// soften it into a "whoosh", then shape the result with an envelope. Runs ONCE at init on the
+// main thread (rand() + allocation are fine here, never in the callback).
 static void build_whoosh(float sampleRate)
 {
     const float seconds = 0.4f; // whoosh length (~0.4 s)
@@ -70,17 +72,33 @@ static void build_whoosh(float sampleRate)
 
     g_whooshBuf.assign(len, 0.0f); // allocate + zero before the loop fills it
 
-    // Fill each sample = amp * envelope(t) * noise. Noise (not a sine) is what makes it a whoosh.
+    // One-pole low-pass filter coefficients (constant for the whole buffer, so compute ONCE
+    // here, not per sample). The filter is y += a*(x - y): each output chases the input but
+    // only closes a fraction `a` of the gap per sample, so it can't keep up with fast (high-
+    // frequency) wiggles -> highs get smoothed away, lows pass. fc = cutoff (Hz): below it
+    // passes, above it is attenuated. a = 1 - e^(-2*pi*fc/SR) makes fc mean the same thing at
+    // any sample rate.
+    const float fc = 1500.0f;
+    const float PI2 = 6.28318530718f;
+    float a = 1 - expf(-PI2 * fc / sampleRate);
+
+    // Filter STATE: the previous output y[n-1]. MUST live outside the loop so it carries from
+    // one sample to the next -- that memory IS the filter. Starts at 0 (filter at rest).
+    float y = 0.0f;
+
+    // Fill each sample = amp * envelope(t) * low-passed noise. Noise (not a sine) is what makes
+    // it a whoosh; the low-pass is what turns "shhh" into "whoosh".
     for (int i = 0; i < len; ++i)
     {
         float t = (float)i / sampleRate;
         // White noise: a fresh random sample in [-1, 1]. rand() -> [0, RAND_MAX]; /RAND_MAX ->
         // [0, 1]; *2 - 1 -> [-1, 1]. Equal energy at ALL frequencies at once = a "shhh".
         float noise = (rand() / (float)RAND_MAX) * 2.0f - 1;
+        y += a * (noise - y);                            // one filter step -> y is now low-passed
         float attack = (t < 0.01f) ? (t / 0.01f) : 1.0f; // 10 ms ramp-in -> no onset click
         float env = attack * expf(-t / 0.15f);           // then exponential decay (tau = 0.15 s)
-        float amp = 0.25f;                               // noise is broadband -> keep it moderate
-        g_whooshBuf[i] = amp * env * noise;
+        float amp = 0.5f;    // bumped up from 0.25: the low-pass drops the level, so compensate
+        g_whooshBuf[i] = amp * env * y;                  // filtered noise (y), not raw noise
     }
 }
 
@@ -185,7 +203,7 @@ static void data_callback(ma_device *pDevice,
         {
             g_whooshPos = -1;
         }
-        
+
         sample *= mainVolume; // apply master volume / mute to the mixed voices, before output
         // Interleaved layout is [L0,R0, L1,R1, ...], so frame `frame` channel `ch` lives at
         // index frame*channels + ch. Writing the SAME value to every channel = a centered
