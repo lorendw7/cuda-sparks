@@ -95,10 +95,11 @@ static void build_one_whoosh(std::vector<float> &buf, float sampleRate, float se
         float attack = (t < 0.01f) ? (t / 0.01f) : 1.0f; // 10 ms ramp-in -> no onset click
         float env = attack * expf(-t / tau);             // then exponential decay (tau = param)
 
-        // THUMP: a short low (80 Hz) sine with its OWN fast decay (tau = 0.05 s) = the mortar
-        // punch at launch. Fixed pitch (no sweep) so a plain sinf(2*pi*f*t) is safe here -- no
-        // phase accumulator needed (that trap only bites a SWEPT oscillator).
-        float thump = 0.35f * expf(-t / 0.05f) * sinf(PI2 * 80.0f * t);
+        // THUMP: a short low (130 Hz) sine with its OWN fast decay (tau = 0.06 s) = the mortar
+        // punch at launch. 130 Hz (not sub-100) so small speakers can actually reproduce it.
+        // Fixed pitch (no sweep) so a plain sinf(2*pi*f*t) is safe here -- no phase accumulator
+        // needed (that trap only bites a SWEPT oscillator).
+        float thump = 0.35f * expf(-t / 0.06f) * sinf(PI2 * 130.0f * t);
 
         buf[i] = amp * env * y + thump; // mix: low-passed-noise whoosh + the thump
     }
@@ -112,10 +113,10 @@ static void build_whoosh(float sampleRate)
 {
     for (int k = 0; k < NUM_WHOOSH; k++)
     {
-        float seconds = 0.7f + 0.3f * (rand() / (float)RAND_MAX);      // 0.7 .. 1.0 s length
-        float fcStart = 1200.0f + 400.0f * (rand() / (float)RAND_MAX); // sweep HIGH end (start)
-        float fcEnd = 500.0f + 300.0f * (rand() / (float)RAND_MAX);    // sweep LOW end (finish)
-        float tau = 0.22f + 0.08f * (rand() / (float)RAND_MAX);        // 0.22 .. 0.30 s decay
+        float seconds = 0.9f + 0.6f * (rand() / (float)RAND_MAX);       // 0.9 .. 1.5 s length (>= 3*tau, safe)
+        float fcStart = 1000.0f + 1400.0f * (rand() / (float)RAND_MAX); // 1000 .. 2400 sweep HIGH end (start)
+        float fcEnd = 300.0f + 600.0f * (rand() / (float)RAND_MAX);     // 300 .. 900 sweep LOW end (finish)
+        float tau = 0.18f + 0.12f * (rand() / (float)RAND_MAX);         // 0.18 .. 0.30 s decay
         float amp = 0.55f;                                             // fixed level (not jittered)
 
         build_one_whoosh(g_whooshBufs[k], sampleRate, seconds, fcStart, fcEnd, tau, amp);
