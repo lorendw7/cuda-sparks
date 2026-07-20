@@ -135,9 +135,10 @@ static void build_whoosh(float sampleRate)
         float fcEnd = 300.0f + 600.0f * (rand() / (float)RAND_MAX);     // 300 .. 900 sweep LOW end (finish)
         float tau = 0.18f + 0.12f * (rand() / (float)RAND_MAX);         // 0.18 .. 0.30 s decay
         float amp = 0.45f;                                             // fixed level (not jittered)
-        // ~half the variants get a faint rising whistle (0.05), the rest none (0.0) -- like a real
-        // show where some shells whistle on the way up and others just thump. Kept quiet on purpose.
-        float whistleAmp = (rand() / (float)RAND_MAX < 0.5f) ? 0.05f : 0.0f;
+        // ~half the variants get a barely-there rising whistle (0.01), the rest none (0.0) -- like a
+        // real show where some shells whistle on the way up and others just thump. Kept a near-silent
+        // accent on purpose (a louder pure rising tone reads as a video-game "power-up").
+        float whistleAmp = (rand() / (float)RAND_MAX < 0.5f) ? 0.01f : 0.0f;
         build_one_whoosh(g_whooshBufs[k], sampleRate, seconds, fcStart, fcEnd, tau, amp, whistleAmp);
     }
 }
