@@ -67,17 +67,19 @@ static std::atomic<bool> g_muted{false};
 
 
 // Render ONE whoosh variant into `buf`. All the per-variant knobs (length, sweep range, decay,
-// level) come in as params so build_whoosh can jitter them. Combines three ingredients:
+// level, whistle) come in as params so build_whoosh can jitter them. Combines FOUR ingredients:
 // low-passed noise (the body) + a cutoff that SWEEPS high->low (movement) + a low "thump" (the
-// mortar launch punch). Runs at init on the main thread (rand + allocation are fine here).
-static void build_one_whoosh(std::vector<float> &buf, float sampleRate, float seconds, float fcStart, float fcEnd, float tau, float amp)
+// mortar launch punch) + an optional rising "whistle". Runs at init on the main thread (rand +
+// allocation are fine here).
+static void build_one_whoosh(std::vector<float> &buf, float sampleRate, float seconds, float fcStart, float fcEnd, float tau, float amp, float whistleAmp)
 {
     int len = (int)(seconds * sampleRate);
     if (len < 1) len = 1;
     buf.assign(len, 0.0f);
 
     const float PI2 = 6.28318530718f;
-    float y = 0.0f; // low-pass filter state (carries across samples, as before)
+    float y = 0.0f;     // low-pass filter state (carries across samples, as before)
+    float phase = 0.0f; // whistle phase accumulator -- also carries across samples (see WHISTLE)
 
     for (int i = 0; i < len; ++i)
     {
@@ -99,9 +101,22 @@ static void build_one_whoosh(std::vector<float> &buf, float sampleRate, float se
         // punch at launch. 130 Hz (not sub-100) so small speakers can actually reproduce it.
         // Fixed pitch (no sweep) so a plain sinf(2*pi*f*t) is safe here -- no phase accumulator
         // needed (that trap only bites a SWEPT oscillator).
-        float thump = 0.35f * expf(-t / 0.06f) * sinf(PI2 * 130.0f * t);
+        float thump = 0.30f * expf(-t / 0.06f) * sinf(PI2 * 130.0f * t);
 
-        buf[i] = amp * env * y + thump; // mix: low-passed-noise whoosh + the thump
+        // WHISTLE: a sine whose pitch RISES 800 -> 2500 Hz over the flight (like a lifting shell),
+        // plus a fast VIBRATO warble and a 2nd HARMONIC so it reads as a real whistle, not a clean
+        // electronic sine. Because the carrier frequency CHANGES, we ACCUMULATE phase each sample --
+        // sin(2*pi*f*t) with a varying f gives the wrong pitch and phase jumps. whistleAmp is 0 for
+        // the variants that don't whistle; env is reused so it fades out with the whoosh.
+        float vib = 1.0f + 0.04f * sinf(PI2 * 10.0f * t);    // 10 Hz warble, +/-4% (fixed LFO -> use t)
+        // note the outer parens: `* vib` must scale the WHOLE frequency (incl. the 800 base), else
+        // the warble is missing at the start (`*` binds tighter than `+`).
+        float whistleF = (800.0f + (2500.0f - 800.0f) * frac) * vib;
+        phase += PI2 * whistleF / sampleRate;                // step phase forward by this sample's freq
+        float osc = sinf(phase) + 0.3f * sinf(2.0f * phase); // fundamental + 2nd harmonic (edge/scream)
+        float whistle = whistleAmp * env * osc;              // level * shared envelope * oscillator
+
+        buf[i] = amp * env * y + thump + whistle; // mix: noise body + thump + whistle
     }
 }
 
@@ -117,9 +132,11 @@ static void build_whoosh(float sampleRate)
         float fcStart = 1000.0f + 1400.0f * (rand() / (float)RAND_MAX); // 1000 .. 2400 sweep HIGH end (start)
         float fcEnd = 300.0f + 600.0f * (rand() / (float)RAND_MAX);     // 300 .. 900 sweep LOW end (finish)
         float tau = 0.18f + 0.12f * (rand() / (float)RAND_MAX);         // 0.18 .. 0.30 s decay
-        float amp = 0.55f;                                             // fixed level (not jittered)
-
-        build_one_whoosh(g_whooshBufs[k], sampleRate, seconds, fcStart, fcEnd, tau, amp);
+        float amp = 0.45f;                                             // fixed level (not jittered)
+        // ~half the variants get a rising whistle (0.15), the rest none (0.0) -- like a real show
+        // where some shells whistle on the way up and others just thump.
+        float whistleAmp = (rand() / (float)RAND_MAX < 0.5f) ? 0.12f : 0.0f;
+        build_one_whoosh(g_whooshBufs[k], sampleRate, seconds, fcStart, fcEnd, tau, amp, whistleAmp);
     }
 }
 
