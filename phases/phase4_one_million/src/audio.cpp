@@ -103,17 +103,19 @@ static void build_one_whoosh(std::vector<float> &buf, float sampleRate, float se
         // needed (that trap only bites a SWEPT oscillator).
         float thump = 0.30f * expf(-t / 0.06f) * sinf(PI2 * 130.0f * t);
 
-        // WHISTLE: a sine whose pitch RISES 800 -> 2500 Hz over the flight (like a lifting shell),
-        // plus a fast VIBRATO warble and a 2nd HARMONIC so it reads as a real whistle, not a clean
-        // electronic sine. Because the carrier frequency CHANGES, we ACCUMULATE phase each sample --
-        // sin(2*pi*f*t) with a varying f gives the wrong pitch and phase jumps. whistleAmp is 0 for
-        // the variants that don't whistle; env is reused so it fades out with the whoosh.
+        // WHISTLE: a sine whose pitch RISES 800 -> 2000 Hz over the flight, with a vibrato warble,
+        // a faint 2nd harmonic, and a little breath noise. Kept QUIET (whistleAmp ~0.05) as a subtle
+        // accent -- a louder pure rising tone reads as a video-game "power-up", not a real whistle.
+        // Because the carrier frequency CHANGES, we ACCUMULATE phase each sample -- sin(2*pi*f*t)
+        // with a varying f gives the wrong pitch and phase jumps. whistleAmp is 0 for the variants
+        // that don't whistle; env is reused so it fades out with the whoosh.
         float vib = 1.0f + 0.04f * sinf(PI2 * 10.0f * t);    // 10 Hz warble, +/-4% (fixed LFO -> use t)
         // note the outer parens: `* vib` must scale the WHOLE frequency (incl. the 800 base), else
         // the warble is missing at the start (`*` binds tighter than `+`).
-        float whistleF = (800.0f + (2500.0f - 800.0f) * frac) * vib;
+        float whistleF = (800.0f + (2000.0f - 800.0f) * frac) * vib;
         phase += PI2 * whistleF / sampleRate;                // step phase forward by this sample's freq
-        float osc = sinf(phase) + 0.3f * sinf(2.0f * phase); // fundamental + 2nd harmonic (edge/scream)
+        float breath = (rand() / (float)RAND_MAX) * 2.0f - 1.0f; // air/breath noise -> less pure, less electronic
+        float osc = sinf(phase) + 0.1f * sinf(2.0f * phase) + 0.2f * breath; // fundamental + faint harmonic + breath
         float whistle = whistleAmp * env * osc;              // level * shared envelope * oscillator
 
         buf[i] = amp * env * y + thump + whistle; // mix: noise body + thump + whistle
@@ -133,9 +135,9 @@ static void build_whoosh(float sampleRate)
         float fcEnd = 300.0f + 600.0f * (rand() / (float)RAND_MAX);     // 300 .. 900 sweep LOW end (finish)
         float tau = 0.18f + 0.12f * (rand() / (float)RAND_MAX);         // 0.18 .. 0.30 s decay
         float amp = 0.45f;                                             // fixed level (not jittered)
-        // ~half the variants get a rising whistle (0.15), the rest none (0.0) -- like a real show
-        // where some shells whistle on the way up and others just thump.
-        float whistleAmp = (rand() / (float)RAND_MAX < 0.5f) ? 0.12f : 0.0f;
+        // ~half the variants get a faint rising whistle (0.05), the rest none (0.0) -- like a real
+        // show where some shells whistle on the way up and others just thump. Kept quiet on purpose.
+        float whistleAmp = (rand() / (float)RAND_MAX < 0.5f) ? 0.05f : 0.0f;
         build_one_whoosh(g_whooshBufs[k], sampleRate, seconds, fcStart, fcEnd, tau, amp, whistleAmp);
     }
 }
