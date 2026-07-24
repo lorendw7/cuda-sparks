@@ -240,6 +240,13 @@ int main()
         float uiMs = 0.0f;
         auto lastUiTime = std::chrono::high_resolution_clock::now();
 
+        // FPS sparkline history: a fixed RING BUFFER of recent FPS samples, pushed at the same
+        // 0.5 s cadence as uiFps (so FPS_HISTORY samples span ~50 s). fpsHistoryPos = next write
+        // slot = ALSO the oldest sample, which is exactly what PlotLines' values_offset wants.
+        const int FPS_HISTORY = 100;
+        float fpsHistory[FPS_HISTORY] = {0.0f}; // zero-filled so the plot starts flat
+        int fpsHistoryPos = 0;                  // next write index (wraps at FPS_HISTORY)
+
         // P3-5: ONE shared "switch preset" path for the keyboard, the auto-cycler, and the
         // menu, so they can never disagree about currentPreset / autoPlay. A lambda (not a
         // free function) because it needs main's locals -- [&] captures them by reference so
@@ -334,6 +341,8 @@ int main()
             {
                 uiFps = io.Framerate;
                 uiMs = 1000.0f / io.Framerate;
+                fpsHistory[fpsHistoryPos] = uiFps;                 // record this sample...
+                fpsHistoryPos = (fpsHistoryPos + 1) % FPS_HISTORY; // ...then advance, wrapping to 0
                 lastUiTime = t0;
             }
 
@@ -431,6 +440,9 @@ int main()
             auto drawReadouts = [&]
             {
                 ImGui::Text("FPS: %.0f (%.2f ms)", uiFps, uiMs);
+                // Rolling FPS sparkline. values_offset = fpsHistoryPos (the oldest sample) makes it
+                // scroll in chronological order; y-range 0..auto keeps a stable floor; 40px tall.
+                ImGui::PlotLines("##fps", fpsHistory, FPS_HISTORY, fpsHistoryPos, nullptr, 0.0f, FLT_MAX, ImVec2(0, 40));
                 ImGui::Text("Particles: %d", sim.size());
                 ImGui::Text("Preset %s", presetNames[currentPreset]);
             };

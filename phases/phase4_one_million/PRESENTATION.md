@@ -214,8 +214,9 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
       count) on top, **PARTICLE INFO** (preset picker + auto-play + a green-on-black scrolling
       `HudLog` ring buffer) below. Near-black bg + terminal-green text via a shared
       `PushStyleColor` pair; strip rect derived from the square edge `sq` (right band on
-      landscape, bottom band on portrait). *(Optional GPU-read-back "hacker-mode" stats + a
-      `PlotLines` FPS sparkline still open.)*
+      landscape, bottom band on portrait). A rolling **`PlotLines` FPS sparkline** now sits under
+      the FPS readout (100-sample ring buffer, pushed at the 0.5 s snapshot cadence, `values_offset`
+      = write cursor so it scrolls in order). *(Optional GPU-read-back "hacker-mode" stats still open.)*
 - [x] P3 Dear ImGui menu — built in sub-steps (core + the windowed-vs-fullscreen layout split
       now done; live physics sliders remain the one optional stretch):
   - [x] **P3-1** ImGui wired up — FetchContent pulls Dear ImGui; a small static `imgui`
