@@ -442,7 +442,7 @@ int main()
                 ImGui::Text("FPS: %.0f (%.2f ms)", uiFps, uiMs);
                 // Rolling FPS sparkline. values_offset = fpsHistoryPos (the oldest sample) makes it
                 // scroll in chronological order; y-range 0..auto keeps a stable floor; 40px tall.
-                ImGui::PlotLines("##fps", fpsHistory, FPS_HISTORY, fpsHistoryPos, nullptr, 0.0f, FLT_MAX, ImVec2(0, 40));
+                ImGui::PlotLines("##fps", fpsHistory, FPS_HISTORY, fpsHistoryPos, nullptr, 0.0f, FLT_MAX, ImVec2(0, 120));
                 ImGui::Text("Particles: %d", sim.size());
                 ImGui::Text("Preset %s", presetNames[currentPreset]);
             };
@@ -517,15 +517,23 @@ int main()
             }
 
             // P1: in auto-play, accumulate real frame time and, once a full interval has
-            // elapsed, advance to the next preset (wrapping with % nBinds) and reset the
-            // timer. Uses dt (wall-clock) rather than a frame count, so the interval stays
-            // ~10 s at any FPS. nBinds doubles as the preset count (one hotkey per preset).
+            // elapsed, jump to a RANDOM preset and reset the timer. Uses dt (wall-clock) rather
+            // than a frame count, so the interval stays ~10 s at any FPS. nBinds doubles as the
+            // preset count (one hotkey per preset).
             if (autoPlay)
             {
                 presetTimer += dt;
                 if (presetTimer >= presetInterval)
                 {
-                    selectPreset((currentPreset + 1) % nBinds, false); // manual=false: stay in auto
+                    // Randomized order: pick a preset at random, but RE-DRAW if it equals the one
+                    // already on screen (advancing to the current preset would look like a stall).
+                    // Safe because nBinds >= 2; with 1 preset this would spin forever.
+                    int next = std::rand() % nBinds; // random index in [0, nBinds)
+                    while (next == currentPreset)
+                    {
+                        next = std::rand() % nBinds; // collided with current -> draw again
+                    }
+                    selectPreset(next, false); // manual=false: stay in auto
                     presetTimer = 0.0f;                                // REQUIRED: selectPreset only resets the timer for a
                                                                        // manual pick, so the auto path must clear it here --
                                                                        // else presetTimer stays >= interval and it re-switches

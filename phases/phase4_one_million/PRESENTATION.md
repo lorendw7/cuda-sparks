@@ -203,7 +203,10 @@ Once this shell exists, **[AUDIO.md](AUDIO.md)** hooks straight onto it:
       Space edge-toggles auto ↔ manual (advances a preset every `presetInterval` ≈ 10 s via
       `(currentPreset + 1) % nBinds`); the number keys still switch presets and drop back to
       manual (sync `currentPreset`, clear `autoPlay`). `currentPreset` boots at 1 to match the
-      ctor's `set_preset(1)`. *(Enhancement — randomized order — still open.)*
+      ctor's `set_preset(1)`. **Randomized order DONE** — the auto-cycler picks `std::rand() %
+      nBinds` and re-draws while it equals `currentPreset` (never "advances" to the preset already
+      on screen; safe since nBinds >= 2). *(Optional: shuffled-deck order so each preset shows once
+      per round — still open.)*
 - [x] **P2a** Fullscreen (F11) + square viewport (`side = min(W,H)`) — `framebuffer_size_callback`
       re-squares the viewport on every resize/toggle; F11 edge-toggles windowed ↔ exclusive
       fullscreen via `glfwSetWindowMonitor` (saving/restoring the windowed rect), native
