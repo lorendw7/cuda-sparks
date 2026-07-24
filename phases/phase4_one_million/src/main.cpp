@@ -436,6 +436,19 @@ int main()
                 }
             };
 
+            // Content 4: live physics sliders. Each binds DIRECTLY to a field of the sim's live
+            // params_ (via the params() accessor), so dragging one changes the running sim on the
+            // next frame -- no "apply" step. A preset switch overwrites these (set_preset copies its
+            // own knobs in), so a tweak is a temporary override that lasts until the next switch.
+            auto drawPhysics = [&]
+            {
+                SimParams &p = sim.params(); // one reference to the live params, then bind each field
+                ImGui::SliderFloat("Gravity", &p.gravity, -2.0f, 2.0f, "%.3f");      // +down / -up (buoyancy)
+                ImGui::SliderFloat("Swirl", &p.swirl, -3.0f, 3.0f, "%.3f");          // vortex; sign = spin dir
+                ImGui::SliderFloat("N-body", &p.nbodyStrength, 0.0f, 0.001f, "%.5f"); // pull toward the origin
+                ImGui::SliderFloat("Damping", &p.damping, 0.90f, 1.0f, "%.4f");      // air drag (1 = none)
+            };
+
             // Content 3: live readouts (FPS / particle count / active preset name).
             auto drawReadouts = [&]
             {
@@ -509,6 +522,8 @@ int main()
                 drawAutoPlay();
                 ImGui::Separator();
                 drawAudio();
+                ImGui::Separator();
+                drawPhysics();
                 ImGui::Separator();
                 hud.draw();
                 ImGui::End();

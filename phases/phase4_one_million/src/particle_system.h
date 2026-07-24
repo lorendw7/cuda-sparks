@@ -87,6 +87,13 @@ public:
     // launch "whoosh" SFX. const: reads the host mirror, touches no device state.
     int launches_last_frame() const { return lastLaunchCount_; }
 
+    // Live, MUTABLE access to the physics knobs so the menu can tweak them in place -- ImGui
+    // sliders bind to &params().gravity etc. update() reads params_ fresh each frame, so edits
+    // take effect next frame. Non-const (unlike size()) because callers WRITE through it. NOTE:
+    // set_preset() overwrites these knobs, so a slider tweak lasts only until the next preset
+    // switch -- a temporary override of the preset's defaults, not a permanent change.
+    SimParams &params() { return params_; }
+
     // Advance the whole system by dt: map the VBO, launch the kernel (physics +
     // vertex write), unmap. Not const -- it mutates device state and the VBO.
     void update(float dt);
